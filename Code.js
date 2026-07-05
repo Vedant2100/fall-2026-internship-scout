@@ -1212,6 +1212,7 @@ function upsertOpportunities_(ss, items) {
   var seen = loadSeen_(ss);
   var now = new Date();
   var newRows = [];
+  var newSeenRows = [];
   var newItems = [];
   var starredCol = APP.opportunityHeaders.indexOf("starred") + 1;
 
@@ -1221,11 +1222,7 @@ function upsertOpportunities_(ss, items) {
     var fingerprint = fingerprint_(normalizedUrl, companyRole);
     if (!normalizedUrl || !item.company || !item.role) return;
 
-    if (seen[fingerprint]) {
-      seenSheet.getRange(seen[fingerprint].row, 5).setValue(now);
-      touchExistingOpportunity_(oppSheet, normalizedUrl, companyRole, now);
-      return;
-    }
+    if (seen[fingerprint]) return;
 
     var id = Utilities.getUuid();
     var row = [
@@ -1252,13 +1249,15 @@ function upsertOpportunities_(ss, items) {
       ""
     ];
     newRows.push(row);
+    newSeenRows.push([fingerprint, normalizedUrl, companyRole, now, now]);
+    seen[fingerprint] = { row: -1 };
     newItems.push(objectFromHeaders_(APP.opportunityHeaders, row));
-    seenSheet.appendRow([fingerprint, normalizedUrl, companyRole, now, now]);
   });
 
   if (newRows.length > 0) {
     oppSheet.getRange(oppSheet.getLastRow() + 1, 1, newRows.length, APP.opportunityHeaders.length).setValues(newRows);
     oppSheet.getRange(oppSheet.getLastRow() - newRows.length + 1, starredCol, newRows.length, 2).insertCheckboxes();
+    seenSheet.getRange(seenSheet.getLastRow() + 1, 1, newSeenRows.length, 5).setValues(newSeenRows);
   }
 
   return newItems;
@@ -1411,16 +1410,23 @@ function sendResultsEmail_(recipient, ss, items, config, rawItems) {
 
 function markEmailed_(ss, items) {
   var sheet = ss.getSheetByName(APP.sheets.opportunities);
+  if (!sheet || sheet.getLastRow() <= 1) return;
   var values = sheet.getDataRange().getValues();
   var ids = {};
   items.forEach(function (item) { ids[item.id] = true; });
   var now = new Date();
   var idIdx = APP.opportunityHeaders.indexOf("id");
-  var emailedCol = APP.opportunityHeaders.indexOf("emailed_at") + 1;
+  var emailedIdx = APP.opportunityHeaders.indexOf("emailed_at");
+  var touched = false;
   for (var i = 1; i < values.length; i++) {
     if (ids[values[i][idIdx]]) {
-      sheet.getRange(i + 1, emailedCol).setValue(now);
+      values[i][emailedIdx] = now;
+      touched = true;
     }
+  }
+  if (touched) {
+    var colValues = values.slice(1).map(function(r) { return [r[emailedIdx]]; });
+    sheet.getRange(2, emailedIdx + 1, colValues.length, 1).setValues(colValues);
   }
 }
 
