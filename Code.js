@@ -229,8 +229,10 @@ function runSearch_(opts) {
     Logger.log("Found " + candidates.length + " unique candidates. Limiting to " + limited.length + " for extraction.");
 
     var previousRawUrls = getPreviousRawUrls_(ss);
+    var evaluatedUrls = getEvaluatedUrls_(ss);
     var newRawGradItems = [];
     var newRawCandidates = [];
+    var unevaluatedCandidates = [];
     var activeUrlsMap = {};
 
     candidates.forEach(function (c) {
@@ -238,6 +240,7 @@ function runSearch_(opts) {
       if (!u) return;
       activeUrlsMap[u] = true;
       if (isExcludedUrl_(u, config) || isDisqualifiedTitle_(c.title || "")) return;
+      
       if (!previousRawUrls[u]) {
         newRawCandidates.push(c);
         previousRawUrls[u] = true;
@@ -245,9 +248,14 @@ function runSearch_(opts) {
           newRawGradItems.push(c);
         }
       }
+
+      if (!evaluatedUrls[u]) {
+        unevaluatedCandidates.push(c);
+        evaluatedUrls[u] = true;
+      }
     });
 
-    Logger.log("Detected " + newRawCandidates.length + " brand new raw URLs across all sources (" + newRawGradItems.length + " from new grad sources).");
+    Logger.log("Detected " + newRawCandidates.length + " brand new raw URLs across all sources (" + unevaluatedCandidates.length + " unseen by Gemini).");
 
     batchTouchOpportunities_(ss, activeUrlsMap, new Date());
 
@@ -255,8 +263,8 @@ function runSearch_(opts) {
       writeRawCandidates_(ss, runId, newRawCandidates);
     }
 
-    var candidatesToExtract = limitCandidates_(newRawCandidates, Number(config.maxUrlsPerRun || APP.defaults.maxUrlsPerRun));
-    Logger.log("Extracting text content from " + candidatesToExtract.length + " brand new page URLs (out of " + newRawCandidates.length + " new total)...");
+    var candidatesToExtract = limitCandidates_(unevaluatedCandidates, Number(config.maxUrlsPerRun || APP.defaults.maxUrlsPerRun));
+    Logger.log("Extracting text content from " + candidatesToExtract.length + " page URLs (out of " + unevaluatedCandidates.length + " unevaluated)...");
     var extractedPages = extractCandidatePages_(tavilyKey, candidatesToExtract, config);
     
     Logger.log("Classifying " + extractedPages.length + " pages with Gemini...");
@@ -1451,6 +1459,28 @@ function getPreviousRawUrls_(ss) {
     }
   }
   return seenUrls;
+}
+
+function getEvaluatedUrls_(ss) {
+  var seenSheet = ss.getSheetByName(APP.sheets.seen);
+  var oppSheet = ss.getSheetByName(APP.sheets.opportunities);
+  var evaluated = {};
+  if (seenSheet && seenSheet.getLastRow() > 1) {
+    var seenValues = seenSheet.getRange(2, 2, seenSheet.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < seenValues.length; i++) {
+      var u1 = normalizeUrl_(seenValues[i][0] || "");
+      if (u1) evaluated[u1] = true;
+    }
+  }
+  if (oppSheet && oppSheet.getLastRow() > 1) {
+    var urlIdx = APP.opportunityHeaders.indexOf("url") + 1;
+    var oppValues = oppSheet.getRange(2, urlIdx, oppSheet.getLastRow() - 1, 1).getValues();
+    for (var j = 0; j < oppValues.length; j++) {
+      var u2 = normalizeUrl_(oppValues[j][0] || "");
+      if (u2) evaluated[u2] = true;
+    }
+  }
+  return evaluated;
 }
 
 function writeRawCandidates_(ss, runId, candidates) {
