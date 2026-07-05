@@ -231,9 +231,14 @@ function runSearch_(opts) {
     var previousRawUrls = getPreviousRawUrls_(ss);
     var newRawGradItems = [];
     var newRawCandidates = [];
+    var activeUrlsMap = {};
+
     candidates.forEach(function (c) {
       var u = normalizeUrl_(c.url || "");
-      if (u && !previousRawUrls[u]) {
+      if (!u) return;
+      activeUrlsMap[u] = true;
+      if (isExcludedUrl_(u, config) || isDisqualifiedTitle_(c.title || "")) return;
+      if (!previousRawUrls[u]) {
         newRawCandidates.push(c);
         previousRawUrls[u] = true;
         if (c.query === "newgrad-jobs.com" || c.query === "SimplifyJobs-NewGrad") {
@@ -241,14 +246,18 @@ function runSearch_(opts) {
         }
       }
     });
+
     Logger.log("Detected " + newRawCandidates.length + " brand new raw URLs across all sources (" + newRawGradItems.length + " from new grad sources).");
+
+    batchTouchOpportunities_(ss, activeUrlsMap, new Date());
 
     if (String(config.includeRawCandidates || "true") === "true" || newRawCandidates.length > 0) {
       writeRawCandidates_(ss, runId, newRawCandidates);
     }
 
-    Logger.log("Extracting text content from " + limited.length + " page URLs...");
-    var extractedPages = extractCandidatePages_(tavilyKey, limited, config);
+    var candidatesToExtract = limitCandidates_(newRawCandidates, Number(config.maxUrlsPerRun || APP.defaults.maxUrlsPerRun));
+    Logger.log("Extracting text content from " + candidatesToExtract.length + " brand new page URLs (out of " + newRawCandidates.length + " new total)...");
+    var extractedPages = extractCandidatePages_(tavilyKey, candidatesToExtract, config);
     
     Logger.log("Classifying " + extractedPages.length + " pages with Gemini...");
     var classified = classifyPages_(geminiKey, extractedPages, config);
@@ -281,7 +290,7 @@ function runSearch_(opts) {
       completed_at: new Date(),
       status: "completed",
       queries_run: queries.length,
-      urls_checked: limited.length,
+      urls_checked: candidatesToExtract.length,
       new_count: newItems.length + newRawGradItems.length,
       emailed: emailed,
       error: ""
@@ -713,14 +722,31 @@ function extractCandidatePages_(tavilyKey, candidates, config) {
   candidates.forEach(function (c) { byUrl[c.url] = c; });
   var pages = [];
 
+  var requests = [];
   for (var i = 0; i < urls.length; i += 20) {
     var batch = urls.slice(i, i + 20);
-    var response = tavilyPost_("/extract", tavilyKey, {
-      urls: batch,
-      extract_depth: String(config.extractDepth || APP.defaults.extractDepth),
-      include_images: false
+    requests.push({
+      url: "https://api.tavily.com/extract",
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "Bearer " + tavilyKey },
+      payload: JSON.stringify({
+        urls: batch,
+        extract_depth: String(config.extractDepth || APP.defaults.extractDepth),
+        include_images: false
+      }),
+      muteHttpExceptions: true
     });
-    (response.results || []).forEach(function (result) {
+  }
+
+  var responses = UrlFetchApp.fetchAll(requests);
+  responses.forEach(function (resp) {
+    if (resp.getResponseCode() !== 200) {
+      Logger.log("Tavily extract batch failed: HTTP " + resp.getResponseCode() + " - " + resp.getContentText());
+      return;
+    }
+    var data = safeJsonParse_(resp.getContentText()) || {};
+    (data.results || []).forEach(function (result) {
       var url = normalizeUrl_(result.url || "");
       var candidate = byUrl[url] || byUrl[normalizeUrl_(result.url || "")] || {};
       pages.push({
@@ -732,7 +758,7 @@ function extractCandidatePages_(tavilyKey, candidates, config) {
         content: truncate_(result.raw_content || result.content || candidate.snippet || "", 18000)
       });
     });
-  }
+  });
 
   return pages.filter(function (page) {
     return page.url && page.content && !isExcludedUrl_(page.url, config);
@@ -1246,6 +1272,46 @@ function touchExistingOpportunity_(sheet, url, companyRole, now) {
   }
 }
 
+function batchTouchOpportunities_(ss, activeUrlsMap, now) {
+  var oppSheet = ss.getSheetByName(APP.sheets.opportunities);
+  var seenSheet = ss.getSheetByName(APP.sheets.seen);
+  
+  if (oppSheet && oppSheet.getLastRow() > 1) {
+    var oppValues = oppSheet.getDataRange().getValues();
+    var urlIdx = APP.opportunityHeaders.indexOf("url");
+    var lastSeenCol = APP.opportunityHeaders.indexOf("last_seen_at");
+    var touchedCount = 0;
+    for (var i = 1; i < oppValues.length; i++) {
+      var u = normalizeUrl_(oppValues[i][urlIdx] || "");
+      if (u && activeUrlsMap[u]) {
+        oppValues[i][lastSeenCol] = now;
+        touchedCount++;
+      }
+    }
+    if (touchedCount > 0) {
+      var colValues = oppValues.slice(1).map(function(r) { return [r[lastSeenCol]]; });
+      oppSheet.getRange(2, lastSeenCol + 1, colValues.length, 1).setValues(colValues);
+      Logger.log("Batched updated last_seen_at for " + touchedCount + " existing opportunities.");
+    }
+  }
+
+  if (seenSheet && seenSheet.getLastRow() > 1) {
+    var seenValues = seenSheet.getDataRange().getValues();
+    var touchedSeen = 0;
+    for (var j = 1; j < seenValues.length; j++) {
+      var su = normalizeUrl_(seenValues[j][1] || "");
+      if (su && activeUrlsMap[su]) {
+        seenValues[j][4] = now; // col E is last_seen_at
+        touchedSeen++;
+      }
+    }
+    if (touchedSeen > 0) {
+      var seenColValues = seenValues.slice(1).map(function(r) { return [r[4]]; });
+      seenSheet.getRange(2, 5, seenColValues.length, 1).setValues(seenColValues);
+    }
+  }
+}
+
 function loadSeen_(ss) {
   var sheet = ss.getSheetByName(APP.sheets.seen);
   var values = sheet.getDataRange().getValues();
@@ -1509,6 +1575,16 @@ function isExcludedUrl_(url, config) {
     .map(function (x) { return x.trim().toLowerCase(); })
     .filter(Boolean);
   return excluded.some(function (part) { return lower.indexOf(part) !== -1; });
+}
+
+function isDisqualifiedTitle_(title) {
+  var lower = String(title || "").toLowerCase();
+  var badPatterns = [
+    /\bsenior\b/, /\bsr\.?\b/, /\bstaff\b/, /\bprincipal\b/, /\bdirector\b/, /\bmanager\b/, /\blead\b/,
+    /\bhead of\b/, /\b3\+?\s*years?\b/, /\b5\+?\s*years?\b/, /\bclinical\b/, /\bwet[\s-]lab\b/,
+    /\bgenomics\b/, /\bbiotech\b/, /\bpharma(ceutical)?\b/, /\bantenna\b/, /\bmechanical\b/, /\belectrical\b/
+  ];
+  return badPatterns.some(function (re) { return re.test(lower); });
 }
 
 function sourceFromUrl_(url) {
