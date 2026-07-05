@@ -210,6 +210,7 @@ function runSearch_(opts) {
   });
 
   try {
+    Logger.log("Starting run " + runId + "...");
     var config = readConfig_(ss);
     var tavilyKey = getRequiredProperty_(APP.props.tavilyKey);
     var geminiKey = getRequiredProperty_(APP.props.geminiKey);
@@ -218,24 +219,35 @@ function runSearch_(opts) {
     var candidates = collectCandidates_(tavilyKey, queries, config);
     var limited = limitCandidates_(candidates, Number(config.maxUrlsPerRun || APP.defaults.maxUrlsPerRun));
 
+    Logger.log("Found " + candidates.length + " unique candidates. Limiting to " + limited.length + " for extraction.");
+
     if (String(config.includeRawCandidates || "true") === "true") {
       writeRawCandidates_(ss, runId, limited);
     }
 
+    Logger.log("Extracting text content from " + limited.length + " page URLs...");
     var extractedPages = extractCandidatePages_(tavilyKey, limited, config);
+    
+    Logger.log("Classifying " + extractedPages.length + " pages with Gemini...");
     var classified = classifyPages_(geminiKey, extractedPages, config);
+    
     var relevant = classified.filter(function (item) {
       var isPartTime = String(item.part_time || "").toLowerCase() === "yes" ||
         /part[\s-]time|flexible|co-op|semester/i.test(String(item.details || "") + " " + String(item.reason || "") + " " + String(item.role || ""));
       return item.is_relevant === true && isPartTime && Number(item.score || 0) >= Number(config.minScore || APP.defaults.minScore);
     });
 
+    Logger.log("Classification complete. Found " + relevant.length + " relevant part-time options (out of " + classified.length + " total opportunities found on pages).");
+
     var newItems = upsertOpportunities_(ss, relevant);
     var emailed = false;
     if (newItems.length > 0) {
+      Logger.log("Sending search results email to " + recipient + " with " + newItems.length + " new items...");
       sendResultsEmail_(recipient, ss, newItems, config);
       markEmailed_(ss, newItems);
       emailed = true;
+    } else {
+      Logger.log("No new opportunities to email in this run.");
     }
 
     updateRun_(ss, runRow, {
@@ -504,6 +516,12 @@ function collectCandidates_(tavilyKey, queries, config) {
       }
     }
 
+    var engineName = "Tavily";
+    if (usedSearchEngine) {
+      engineName = serperKey ? "Serper.dev" : "Google Custom Search";
+    }
+    Logger.log("Query [" + query + "] -> Found " + results.length + " candidates using " + engineName);
+
     results.forEach(function (result) {
       var url = normalizeUrl_(result.url || "");
       if (!url || isExcludedUrl_(url, config)) return;
@@ -566,16 +584,24 @@ function extractCandidatePages_(tavilyKey, candidates, config) {
 function classifyPages_(geminiKey, pages, config) {
   var items = [];
   pages.forEach(function (page, index) {
+    Logger.log("Classifying page [" + (index + 1) + "/" + pages.length + "]: " + page.url);
     if (index > 0) {
       Utilities.sleep(5000); // 5-second delay to stay well under the 20 RPM free tier limit
     }
     var classified = classifyPageWithGemini_(geminiKey, page, config);
-    if (!classified) return;
+    if (!classified) {
+      Logger.log("  -> Failed to classify page or returned empty.");
+      return;
+    }
     var rows = Array.isArray(classified.opportunities) ? classified.opportunities : [];
+    if (rows.length === 0) {
+      Logger.log("  -> No opportunities found on this page.");
+    }
     rows.forEach(function (row) {
       row.url = normalizeUrl_(row.url || page.url);
       row.source = row.source || page.source;
       row.raw_title = page.title;
+      Logger.log("  -> Found: " + row.company + " - " + row.role + " | Track: " + row.track + " | Relevant: " + row.is_relevant + " | Part-time: " + row.part_time + " | Score: " + row.score + " | Reason: " + (row.reason || "none"));
       if (!isExcludedUrl_(row.url, config)) {
         items.push(row);
       }
@@ -836,7 +862,7 @@ function httpPostJson_(url, payload, headers) {
         return safeJsonParse_(body);
       }
 
-      console.warn("HTTP " + code + " from " + url + " (Attempt " + attempt + "/" + maxRetries + "): " + truncate_(body, 200));
+      Logger.log("HTTP " + code + " from " + url + " (Attempt " + attempt + "/" + maxRetries + "): " + truncate_(body, 200));
 
       // Retry on transient status codes: 429 and 5xx (server errors)
       if (code === 429 || code >= 500) {
@@ -846,7 +872,7 @@ function httpPostJson_(url, payload, headers) {
             var match = body.match(/Please retry in (\d+(\.\d+)?)s/i);
             var waitSeconds = match ? (parseFloat(match[1]) + 2) : 15;
             sleepDuration = Math.round(waitSeconds * 1000);
-            console.warn("HTTP 429 (Rate Limit). Sleeping for " + sleepDuration + "ms before retrying...");
+            Logger.log("HTTP 429 (Rate Limit). Sleeping for " + sleepDuration + "ms before retrying...");
           } else {
             var jitter = Math.floor(Math.random() * 500);
             sleepDuration = waitTime + jitter;
@@ -862,11 +888,11 @@ function httpPostJson_(url, payload, headers) {
       if (e.message && e.message.indexOf("HTTP ") === 0) {
         throw e;
       }
-      console.warn("Network fetch error (Attempt " + attempt + "/" + maxRetries + "): " + e.message);
+      Logger.log("Network fetch error (Attempt " + attempt + "/" + maxRetries + "): " + e.message);
       if (attempt < maxRetries) {
         var jitter = Math.floor(Math.random() * 500);
         var sleepDuration = waitTime + jitter;
-        console.warn("Retrying in " + sleepDuration + "ms...");
+        Logger.log("Retrying in " + sleepDuration + "ms...");
         Utilities.sleep(sleepDuration);
         waitTime *= 2;
         continue;
