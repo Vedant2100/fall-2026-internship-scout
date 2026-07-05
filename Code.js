@@ -28,9 +28,9 @@ var APP = {
     minScore: "65",
     searchDepth: "basic",
     extractDepth: "basic",
-    geminiModel: "gemini-2.5-flash-lite",
+    geminiModel: "gemini-3.1-flash-lite",
     includeRawCandidates: "true",
-    excludedDomains: "workday, myworkdayjobs, wd1.myworkdaysite, wd5.myworkdayjobs",
+    excludedDomains: "workday, myworkdayjobs, wd1.myworkdaysite, wd5.myworkdayjobs, simplify",
     locationTerms: "San Francisco, Bay Area, Silicon Valley, Remote US, United States",
     roleTerms: "AI, machine learning, ML, MLE, software, SWE, data science, research",
     termTerms: "Fall 2026, part-time, intern, internship, co-op",
@@ -79,6 +79,7 @@ function onOpen() {
     .createMenu("Internship Scout")
     .addItem("Run Search Now", "runSearchNow")
     .addItem("Setup / Repair Dashboard", "setupDashboard")
+    .addItem("Clear Existing Data", "clearScoutData")
     .addSeparator()
     .addItem("Install Daily Trigger", "installDailyTrigger")
     .addItem("Remove Triggers", "removeScoutTriggers")
@@ -88,11 +89,42 @@ function onOpen() {
     .addToUi();
 }
 
+function clearScoutData() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.alert(
+    "Clear All Scout Data?",
+    "This will delete all existing rows from Opportunities, Runs, Seen, and RawCandidates so your scout starts with a clean slate.\n\nYour Config sheet and Script Properties will NOT be affected.\n\nAre you sure you want to proceed?",
+    ui.ButtonSet.YES_NO
+  );
+  if (response !== ui.Button.YES) return;
+
+  var ss = getSpreadsheet_();
+  var sheetsToClear = [
+    APP.sheets.opportunities,
+    APP.sheets.runs,
+    APP.sheets.seen,
+    APP.sheets.raw
+  ];
+
+  sheetsToClear.forEach(function (sheetName) {
+    var sheet = ss.getSheetByName(sheetName);
+    if (sheet) {
+      var lastRow = sheet.getLastRow();
+      var lastCol = sheet.getLastColumn();
+      if (lastRow > 1 && lastCol > 0) {
+        sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+      }
+    }
+  });
+
+  ui.alert("All existing data cleared! You are ready for a fresh search run.");
+}
+
 function setupDashboard() {
   var ss = getSpreadsheet_();
   ensureWorkbook_(ss);
   SpreadsheetApp.getUi().alert(
-    APP.name + " dashboard is ready.\n\nAdd Script Properties for TAVILY_API_KEY, GEMINI_API_KEY, and RECIPIENT_EMAIL before running a real search."
+    APP.name + " dashboard is ready.\n\nAdd Script Properties for TAVILY_API_KEY, GEMINI_API_KEY, and RECIPIENT_EMAIL.\n\n(Optional) Add SERPER_API_KEY to use Google Search via Serper.dev, or GSEARCH_API_KEY + GSEARCH_CX to use Google Custom Search as your primary search engine!"
   );
 }
 
@@ -193,7 +225,9 @@ function runSearch_(opts) {
     var extractedPages = extractCandidatePages_(tavilyKey, limited, config);
     var classified = classifyPages_(geminiKey, extractedPages, config);
     var relevant = classified.filter(function (item) {
-      return item.is_relevant === true && Number(item.score || 0) >= Number(config.minScore || APP.defaults.minScore);
+      var isPartTime = String(item.part_time || "").toLowerCase() === "yes" ||
+        /part[\s-]time|flexible|co-op|semester/i.test(String(item.details || "") + " " + String(item.reason || "") + " " + String(item.role || ""));
+      return item.is_relevant === true && isPartTime && Number(item.score || 0) >= Number(config.minScore || APP.defaults.minScore);
     });
 
     var newItems = upsertOpportunities_(ss, relevant);
@@ -343,42 +377,146 @@ function readConfig_(ss) {
 
 function buildSearchQueries_(config) {
   var baseSites = '(site:jobs.ashbyhq.com OR site:greenhouse.io OR site:jobs.lever.co)';
+  var pt = '("part-time" OR "part time" OR "during semester" OR co-op OR "flexible hours" OR "flexible schedule")';
   return [
-    '"San Francisco" ' + baseSites + ' "intern" ("data science" OR "AI" OR "software" OR "Research") -workday',
+    '"San Francisco" ' + baseSites + ' "intern" ' + pt + ' ("data science" OR "AI" OR "software" OR "Research") -workday',
     '"Fall 2026" "part-time" "AI intern" "San Francisco" site:jobs.ashbyhq.com -workday',
-    '"Fall 2026" "machine learning intern" "Bay Area" site:jobs.lever.co -workday',
-    '"research intern" "Fall 2026" "AI" "San Francisco" site:greenhouse.io -workday',
+    '"Fall 2026" ("part time" OR "flexible hours") "machine learning intern" "Bay Area" site:jobs.lever.co -workday',
+    '"research intern" ("part-time" OR "flexible") "Fall 2026" "AI" "San Francisco" site:greenhouse.io -workday',
     '"software engineer intern" "Fall 2026" "part-time" "AI" site:jobs.ashbyhq.com -workday',
-    '"MLE intern" "Fall 2026" "San Francisco" site:jobs.lever.co -workday',
-    '"machine learning research intern" "Fall 2026" "startup" "San Francisco" -workday',
+    '"MLE intern" ("part-time" OR "flexible schedule") "Fall 2026" "San Francisco" site:jobs.lever.co -workday',
+    '"machine learning research intern" ("part time" OR "flexible") "Fall 2026" "startup" "San Francisco" -workday',
     '"AI research intern" "part-time" "Fall 2026" "Bay Area" -workday',
-    '"software intern" "AI" "Fall 2026" "San Francisco" site:greenhouse.io -workday',
-    '"data science intern" "Fall 2026" "part-time" "San Francisco" site:jobs.lever.co -workday'
+    '"software intern" ("part-time" OR co-op OR flexible) "AI" "Fall 2026" "San Francisco" site:greenhouse.io -workday',
+    '"data science intern" "Fall 2026" ("part-time" OR flexible) "San Francisco" site:jobs.lever.co -workday'
   ];
+}
+
+function searchGoogleCustomSearch_(query, gKey, gCx) {
+  var url = "https://www.googleapis.com/customsearch/v1?key=" + encodeURIComponent(gKey) +
+            "&cx=" + encodeURIComponent(gCx) +
+            "&q=" + encodeURIComponent(query) +
+            "&num=10";
+  var response = UrlFetchApp.fetch(url, {
+    method: "get",
+    muteHttpExceptions: true
+  });
+  var code = response.getResponseCode();
+  if (code >= 200 && code < 300) {
+    var data = JSON.parse(response.getContentText() || "{}");
+    var items = data.items || [];
+    return items.map(function(item) {
+      return {
+        title: item.title || "",
+        url: item.link || "",
+        snippet: item.snippet || "",
+        score: "80"
+      };
+    });
+  }
+  throw new Error("GSearch HTTP " + code + ": " + response.getContentText());
+}
+
+function searchSerper_(query, apiKey) {
+  var url = "https://google.serper.dev/search";
+  var payload = {
+    q: query,
+    num: 10
+  };
+  var response = UrlFetchApp.fetch(url, {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      "X-API-KEY": apiKey
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+  var code = response.getResponseCode();
+  if (code >= 200 && code < 300) {
+    var data = JSON.parse(response.getContentText() || "{}");
+    var organic = data.organic || [];
+    return organic.map(function(item) {
+      return {
+        title: item.title || "",
+        url: item.link || "",
+        snippet: item.snippet || "",
+        score: "85"
+      };
+    });
+  }
+  throw new Error("Serper HTTP " + code + ": " + response.getContentText());
 }
 
 function collectCandidates_(tavilyKey, queries, config) {
   var byUrl = {};
+  var props = PropertiesService.getScriptProperties();
+  var serperKey = props.getProperty("SERPER_API_KEY");
+  var gKey = props.getProperty("GSEARCH_API_KEY") || props.getProperty("GOOGLE_SEARCH_API_KEY");
+  var gCx = props.getProperty("GSEARCH_CX") || props.getProperty("GOOGLE_SEARCH_CX");
+
   queries.forEach(function (query) {
-    var payload = {
-      query: query,
-      search_depth: String(config.searchDepth || APP.defaults.searchDepth),
-      max_results: 10,
-      include_answer: false,
-      include_raw_content: false
-    };
-    var response = tavilyPost_("/search", tavilyKey, payload);
-    var results = response.results || [];
+    var results = [];
+    var usedSearchEngine = false;
+
+    // 1. Try Serper.dev (Google Search API)
+    if (serperKey) {
+      try {
+        results = searchSerper_(query, serperKey);
+        usedSearchEngine = true;
+      } catch (e) {
+        Logger.log("Serper Search failed for query [" + query + "], trying fallback: " + e.message);
+      }
+    }
+
+    // 2. Try Google Custom Search (secondary)
+    if (!usedSearchEngine && gKey && gCx) {
+      try {
+        results = searchGoogleCustomSearch_(query, gKey, gCx);
+        usedSearchEngine = true;
+      } catch (e) {
+        Logger.log("Google Custom Search failed for query [" + query + "], trying fallback: " + e.message);
+      }
+    }
+
+    // 3. Try Tavily Search (tertiary fallback)
+    if (!usedSearchEngine || results.length === 0) {
+      try {
+        var payload = {
+          query: query,
+          search_depth: String(config.searchDepth || APP.defaults.searchDepth),
+          max_results: 10,
+          include_answer: false,
+          include_raw_content: false
+        };
+        var response = tavilyPost_("/search", tavilyKey, payload);
+        var tResults = response.results || [];
+        results = tResults.map(function(r) {
+          return {
+            title: r.title || "",
+            url: r.url || "",
+            snippet: r.content || r.snippet || "",
+            score: r.score || ""
+          };
+        });
+      } catch (e) {
+        Logger.log("Tavily search failed for query [" + query + "]: " + e.message);
+      }
+    }
+
     results.forEach(function (result) {
       var url = normalizeUrl_(result.url || "");
       if (!url || isExcludedUrl_(url, config)) return;
+      var source = sourceFromUrl_(url);
+      if (source === "Other") return; // Keep ONLY direct Greenhouse, Ashby, and Lever application pages
+
       if (!byUrl[url]) {
         byUrl[url] = {
           query: query,
           title: result.title || "",
           url: url,
-          source: sourceFromUrl_(url),
-          snippet: result.content || result.snippet || "",
+          source: source,
+          snippet: result.snippet || "",
           score: result.score || ""
         };
       }
@@ -427,7 +565,10 @@ function extractCandidatePages_(tavilyKey, candidates, config) {
 
 function classifyPages_(geminiKey, pages, config) {
   var items = [];
-  pages.forEach(function (page) {
+  pages.forEach(function (page, index) {
+    if (index > 0) {
+      Utilities.sleep(5000); // 5-second delay to stay well under the 20 RPM free tier limit
+    }
     var classified = classifyPageWithGemini_(geminiKey, page, config);
     if (!classified) return;
     var rows = Array.isArray(classified.opportunities) ? classified.opportunities : [];
@@ -447,17 +588,19 @@ function classifyPageWithGemini_(geminiKey, page, config) {
   var prompt = [
     "You are classifying startup internship job pages for a personal internship scout.",
     "",
-    "Target: Fall 2026 part-time internships in AI/ML research, machine learning engineering, data science, software engineering, or SWE/MLE roles.",
-    "Prefer San Francisco, Bay Area, Silicon Valley, Remote US, or US roles. Exclude Workday pages and unrelated full-time roles.",
+    "Target: STRICTLY part-time or flexible-hour academic-semester internships in AI/ML research, MLE, SWE, or Data Science.",
+    "CRITICAL RULE 1 (Part-time): Do NOT assume co-ops or internships are part-time. US/Canada co-ops are typically full-time 40-hour roles. You MUST only mark `is_relevant` as true if the posting explicitly states it is 'part-time', 'flexible hours', '10-20 hours/week', or designed to be completed concurrently with academic classes. If it is a full-time 40 hr/week position, or is silent on part-time flexibility, set `is_relevant` to false and `part_time` to 'No'.",
+    "CRITICAL RULE 2 (Technical Role): We ONLY want technical engineering/research roles (AI/ML Research, MLE, SWE, Data Science). If a role is design (e.g. strategic design), finance/investment (e.g. market research, private equity), marketing, advisory, security analysis, operations, or project management, set `is_relevant` to false and track to 'Other'.",
+    "Prefer San Francisco, Bay Area, Silicon Valley, Remote US, or US roles. Exclude Workday pages.",
     "Use the page URL exactly if it is a real application/job page.",
     "",
-    "Important search inspiration: \"San Francisco\" site:jobs.ashbyhq.com OR site:greenhouse.io OR site:jobs.lever.co \"intern\" (\"data science\" OR \"AI\" OR \"software\" OR \"Research\")",
+    "Important search inspiration: \"San Francisco\" site:jobs.ashbyhq.com OR site:greenhouse.io OR site:jobs.lever.co \"intern\" \"part-time\" (\"data science\" OR \"AI\" OR \"software\" OR \"Research\")",
     "",
     "Return ONLY valid JSON matching this shape:",
     "{\"opportunities\":[{\"is_relevant\":true,\"company\":\"\",\"role\":\"\",\"track\":\"AI Research|MLE|SWE|Data Science|Other\",\"location\":\"\",\"term\":\"Fall 2026|Unknown|Other\",\"part_time\":\"Yes|No|Unknown\",\"url\":\"\",\"source\":\"Ashby|Greenhouse|Lever|Other\",\"details\":\"1-2 sentence summary\",\"visa_sponsorship\":\"Yes|No|Unknown\",\"iitb_alumni\":\"Yes|No|Unknown\",\"score\":0,\"reason\":\"short filtering rationale\"}]}",
     "",
-    "Scoring: 90+ exact Fall 2026 part-time AI/ML/SWE intern match; 75+ strong intern match but timing/part-time uncertain; below 65 if likely irrelevant.",
-    "If no relevant opportunity exists, return {\"opportunities\":[]}.",
+    "Scoring: 90+ exact part-time or flexible AI/ML/SWE intern match; 75-89 strong part-time/flexible match; below 65 if full-time or irrelevant.",
+    "If no part-time or flexible opportunity exists on the page, return {\"opportunities\":[]}.",
     "",
     "Config guidance:",
     "Locations: " + config.locationTerms,
@@ -568,8 +711,7 @@ function loadSeen_(ss) {
 }
 
 function sendResultsEmail_(recipient, ss, items, config) {
-  var maxItems = Number(config.maxNewEmailItems || APP.defaults.maxNewEmailItems);
-  var shown = items.slice(0, maxItems);
+  var shown = items; // send all
   var subject = config.emailSubjectPrefix + ": " + items.length + " new Fall 2026 internship" + (items.length === 1 ? "" : "s");
   var sheetUrl = ss.getUrl();
   var html = [
@@ -603,10 +745,6 @@ function sendResultsEmail_(recipient, ss, items, config) {
     ].join("\n"));
   });
   html.push("</ol>");
-  if (items.length > shown.length) {
-    html.push("<p>More results are in the Sheet.</p>");
-    text.push("More results are in the Sheet.");
-  }
 
   MailApp.sendEmail({
     to: recipient,
@@ -678,19 +816,64 @@ function tavilyPost_(path, apiKey, payload) {
 }
 
 function httpPostJson_(url, payload, headers) {
-  var response = UrlFetchApp.fetch(url, {
-    method: "post",
-    contentType: "application/json",
-    payload: JSON.stringify(payload),
-    headers: headers || {},
-    muteHttpExceptions: true
-  });
-  var code = response.getResponseCode();
-  var body = response.getContentText();
-  if (code < 200 || code >= 300) {
-    throw new Error("HTTP " + code + " from " + url + ": " + truncate_(body, 1000));
+  var maxRetries = 5;
+  var waitTime = 1000;
+  var response, code, body;
+
+  for (var attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      response = UrlFetchApp.fetch(url, {
+        method: "post",
+        contentType: "application/json",
+        payload: JSON.stringify(payload),
+        headers: headers || {},
+        muteHttpExceptions: true
+      });
+      code = response.getResponseCode();
+      body = response.getContentText();
+
+      if (code >= 200 && code < 300) {
+        return safeJsonParse_(body);
+      }
+
+      console.warn("HTTP " + code + " from " + url + " (Attempt " + attempt + "/" + maxRetries + "): " + truncate_(body, 200));
+
+      // Retry on transient status codes: 429 and 5xx (server errors)
+      if (code === 429 || code >= 500) {
+        if (attempt < maxRetries) {
+          var sleepDuration;
+          if (code === 429) {
+            var match = body.match(/Please retry in (\d+(\.\d+)?)s/i);
+            var waitSeconds = match ? (parseFloat(match[1]) + 2) : 15;
+            sleepDuration = Math.round(waitSeconds * 1000);
+            console.warn("HTTP 429 (Rate Limit). Sleeping for " + sleepDuration + "ms before retrying...");
+          } else {
+            var jitter = Math.floor(Math.random() * 500);
+            sleepDuration = waitTime + jitter;
+            waitTime *= 2;
+          }
+          Utilities.sleep(sleepDuration);
+          continue;
+        }
+      }
+
+      throw new Error("HTTP " + code + " from " + url + ": " + truncate_(body, 1000));
+    } catch (e) {
+      if (e.message && e.message.indexOf("HTTP ") === 0) {
+        throw e;
+      }
+      console.warn("Network fetch error (Attempt " + attempt + "/" + maxRetries + "): " + e.message);
+      if (attempt < maxRetries) {
+        var jitter = Math.floor(Math.random() * 500);
+        var sleepDuration = waitTime + jitter;
+        console.warn("Retrying in " + sleepDuration + "ms...");
+        Utilities.sleep(sleepDuration);
+        waitTime *= 2;
+        continue;
+      }
+      throw e;
+    }
   }
-  return safeJsonParse_(body);
 }
 
 function normalizeUrl_(url) {
@@ -761,12 +944,58 @@ function getRequiredProperty_(key) {
 }
 
 function safeJsonParse_(text) {
+  var str = String(text || "").trim();
+  // 1. Try raw JSON parsing first
   try {
-    return JSON.parse(text);
-  } catch (error) {
-    var cleaned = String(text).replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
-    return JSON.parse(cleaned);
+    return JSON.parse(str);
+  } catch (e) {
+    // Continue to advanced parsing
   }
+
+  // 2. Try to find the JSON boundary by looking for { ... } or [ ... ]
+  var firstBrace = str.indexOf('{');
+  var lastBrace = str.lastIndexOf('}');
+  var firstBracket = str.indexOf('[');
+  var lastBracket = str.lastIndexOf(']');
+
+  var start = -1;
+  var end = -1;
+
+  if (firstBrace !== -1 && lastBrace !== -1) {
+    if (firstBracket !== -1 && lastBracket !== -1) {
+      if (firstBrace < firstBracket) {
+        start = firstBrace;
+        end = lastBrace;
+      } else {
+        start = firstBracket;
+        end = lastBracket;
+      }
+    } else {
+      start = firstBrace;
+      end = lastBrace;
+    }
+  } else if (firstBracket !== -1 && lastBracket !== -1) {
+    start = firstBracket;
+    end = lastBracket;
+  }
+
+  if (start !== -1 && end !== -1 && end > start) {
+    var candidate = str.substring(start, end + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch (error) {
+      try {
+        var furtherCleaned = candidate
+          .replace(/,\s*([\]}])/g, '$1') // remove trailing commas
+          .replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1'); // strip comments
+        return JSON.parse(furtherCleaned);
+      } catch (error2) {
+        throw new Error("Failed to parse JSON. Error: " + error.message + "\nContent: " + candidate);
+      }
+    }
+  }
+
+  throw new Error("Could not find any JSON object or array in LLM response: " + str);
 }
 
 function truncate_(text, maxChars) {
