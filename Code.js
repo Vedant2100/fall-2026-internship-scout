@@ -971,35 +971,65 @@ function classifyNewGradBatchWithGemini_(geminiKey, pages, config) {
 
 // ── External Source: intern-list.com (Airtable Shared Views) ───
 
-function fetchInternListCandidates_(config) {
-  var sources = [
-    { appId: "appjSXAWiVF4d1HoZ", shareId: "shrf04yGbrK3IebAl", label: "AI/ML" },
-    { appId: "appbsiP1flCoaXCSm", shareId: "shreRS1cFLbduwBaU", label: "Data Analysis" },
-    { appId: "appzSWTM1QA543oU", shareId: "shrpvJsQjbhk8l9pi", label: "SWE" }
-  ];
-  var candidates = [];
+function discoverAndScrapeAirtables_(homepageUrl, defaultSources, labelPrefix, defaultScore) {
+  var sources = defaultSources.slice();
+  try {
+    var resp = UrlFetchApp.fetch(homepageUrl, { muteHttpExceptions: true });
+    if (resp.getResponseCode() === 200) {
+      var html = resp.getContentText();
+      var regex = /https?:\/\/airtable\.com\/embed\/(app[a-zA-Z0-9]+)\/(shr[a-zA-Z0-9]+)/gi;
+      var match;
+      var foundMap = {};
+      while ((match = regex.exec(html)) !== null) {
+        var k = match[1] + "|" + match[2];
+        foundMap[k] = true;
+      }
+      var discovered = Object.keys(foundMap);
+      if (discovered.length > 0) {
+        sources = discovered.slice(0, 6).map(function(k, idx) {
+          var parts = k.split("|");
+          return { appId: parts[0], shareId: parts[1], label: "Table " + (idx + 1) };
+        });
+        Logger.log("  Dynamically discovered " + sources.length + " active Airtable views on " + homepageUrl);
+      }
+    }
+  } catch (e) {
+    Logger.log("  Could not check live homepage " + homepageUrl + ", using fallback sources: " + e.message);
+  }
 
+  var candidates = [];
   sources.forEach(function (src, idx) {
-    if (idx > 0) Utilities.sleep(2000);
+    if (idx > 0) Utilities.sleep(1500);
     try {
       var rows = fetchAirtableSharedView_(src.appId, src.shareId);
-      Logger.log("  intern-list.com " + src.label + ": " + rows.length + " rows");
+      Logger.log("  " + labelPrefix + " (" + src.label + "): " + rows.length + " rows");
       rows.forEach(function (row) {
         if (row.url) {
           candidates.push({
-            title: (row.company || "") + " - " + (row.role || ""),
+            title: (row.company || "Unknown") + " - " + (row.role || "Role"),
             url: row.url,
-            snippet: (row.role || "") + " at " + (row.company || "") + " | " + (row.location || ""),
-            score: "75"
+            snippet: (row.role || "Role") + " at " + (row.company || "Unknown") + " | " + (row.location || "US"),
+            score: String(defaultScore || "75")
           });
         }
       });
     } catch (e) {
-      Logger.log("  intern-list.com " + src.label + " failed: " + e.message);
+      Logger.log("  " + labelPrefix + " (" + src.label + ") failed: " + e.message);
     }
   });
 
   return candidates;
+}
+
+function fetchInternListCandidates_(config) {
+  var sources = [
+    { appId: "appLzkCIXi5t8aYf4", shareId: "shrIEKOHYPMwmpheG", label: "SWE" },
+    { appId: "appjSXAWiVF4d1HoZ", shareId: "shrf04yGbrK3IebAl", label: "AI/ML" },
+    { appId: "app17F0kkWQZhC6HB", shareId: "shrOTtndhc6HSgnYb", label: "Data" },
+    { appId: "appbsiP1flCoaXCSm", shareId: "shreRS1cFLbduwBaU", label: "Data Analysis" },
+    { appId: "apprzZO4NFGouLji9", shareId: "shrApQMVthWyRpdyu", label: "Other Tech" }
+  ];
+  return discoverAndScrapeAirtables_("https://intern-list.com", sources, "intern-list.com", "75");
 }
 
 function fetchAirtableSharedView_(appId, shareId) {
@@ -1037,7 +1067,7 @@ function fetchAirtableSharedView_(appId, shareId) {
 
   var apiData = JSON.parse(apiResp.getContentText());
   var data = apiData.data || {};
-  var rows = data.rows || [];
+  var rows = data.rows || (data.table || {}).rows || [];
   var columns = (data.table || {}).columns || [];
 
   // Build column ID -> name map
@@ -1177,29 +1207,7 @@ function fetchNewGradJobsCandidates_(config) {
     { appId: "appZ5SmkwkcW7Xd8C", shareId: "shr51y9s2uIRlkvI8", label: "Data Analysis" },
     { appId: "appqYfRGKpLQ8UsdH", shareId: "shrFnvW20reJCEkYZ", label: "Data Engineer" }
   ];
-  var candidates = [];
-
-  sources.forEach(function (src, idx) {
-    if (idx > 0) Utilities.sleep(2000);
-    try {
-      var rows = fetchAirtableSharedView_(src.appId, src.shareId);
-      Logger.log("  newgrad-jobs.com " + src.label + ": " + rows.length + " rows");
-      rows.forEach(function (row) {
-        if (row.url) {
-          candidates.push({
-            title: (row.company || "Unknown") + " - " + (row.role || "New Grad"),
-            url: row.url,
-            snippet: (row.role || "New Grad Role") + " at " + (row.company || "Unknown") + " | " + (row.location || "US"),
-            score: "80"
-          });
-        }
-      });
-    } catch (e) {
-      Logger.log("  newgrad-jobs.com " + src.label + " fetch failed: " + e.message);
-    }
-  });
-
-  return candidates;
+  return discoverAndScrapeAirtables_("https://newgrad-jobs.com", sources, "newgrad-jobs.com", "80");
 }
 
 // ── External Source: SimplifyJobs New-Grad GitHub ──────────────
