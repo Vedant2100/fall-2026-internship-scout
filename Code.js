@@ -1071,54 +1071,101 @@ function fetchAirtableSharedView_(appId, shareId) {
 
 // ── External Source: SimplifyJobs GitHub ───────────────────────
 
+function parseSimplifyJobsReadme_(md, defaultScore) {
+  var candidates = [];
+  var lastCompany = "Unknown";
+
+  // 1. Try HTML <tr> table rows
+  var trBlocks = md.split("<tr");
+  if (trBlocks.length > 1) {
+    for (var i = 1; i < trBlocks.length; i++) {
+      var r = trBlocks[i];
+      if (/Company/i.test(r) || /<th/i.test(r)) continue;
+      
+      var tds = [];
+      var tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+      var match;
+      while ((match = tdRegex.exec(r)) !== null) {
+        tds.push(match[1].replace(/<[^>]+>/g, "").trim());
+      }
+      if (tds.length < 3) continue;
+
+      var rawCompany = tds[0].replace(/🔥/g, "").replace(/\*\*/g, "").replace(/↳/g, "").trim();
+      if (rawCompany && rawCompany !== "↳") {
+        lastCompany = rawCompany;
+      }
+      var company = lastCompany;
+      var role = tds[1] || "Role";
+      var location = tds[2] || "US";
+
+      var urlRegex = /href=[\"\'](https?:\/\/[^\"\']+)[\"\']/gi;
+      var urlMatch;
+      var applyUrl = null;
+      while ((urlMatch = urlRegex.exec(r)) !== null) {
+        var u = urlMatch[1];
+        if (u.indexOf("simplify.jobs") === -1 && u.indexOf("github.com") === -1 && u.indexOf("swelist.com") === -1) {
+          applyUrl = u;
+        }
+      }
+      if (!applyUrl) continue;
+
+      candidates.push({
+        title: company + " - " + role,
+        url: applyUrl,
+        snippet: role + " at " + company + " | " + location,
+        score: String(defaultScore || "75")
+      });
+    }
+  }
+
+  // 2. Fall back to Markdown | table rows if HTML blocks yielded nothing
+  if (candidates.length === 0) {
+    var lines = md.split("\n");
+    lines.forEach(function (line) {
+      if (!line.match(/^\|/)) return;
+      if (line.match(/^\|\s*---/)) return;
+      if (line.match(/^\|\s*Company/i)) return;
+
+      var cols = line.split("|").map(function (c) { return c.trim(); }).filter(Boolean);
+      if (cols.length < 4) return;
+
+      var rawCompany = cols[0].replace(/\*\*/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
+      if (rawCompany && rawCompany !== "↳") lastCompany = rawCompany;
+      var company = lastCompany;
+      var role = cols[1].replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
+      var location = cols[2].trim();
+
+      var um = line.match(/\[(?:↗️|🔗|Apply|Link)\]\((https?:\/\/[^)]+)\)/i);
+      if (!um) {
+        um = line.match(/\(https?:\/\/[^)]+\)/g);
+        if (um) {
+          var lastUrl = um[um.length - 1];
+          um = [null, lastUrl.replace(/^\(/, "").replace(/\)$/, "")];
+        }
+      }
+      if (!um) return;
+      var applyUrl = um[1];
+      if (!applyUrl || applyUrl.indexOf("simplify.jobs") !== -1) return;
+
+      candidates.push({
+        title: company + " - " + role,
+        url: applyUrl,
+        snippet: role + " at " + company + " | " + location,
+        score: String(defaultScore || "75")
+      });
+    });
+  }
+
+  return candidates;
+}
+
 function fetchSimplifyJobsCandidates_(config) {
   var url = "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README-Off-Season.md";
   var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
   if (resp.getResponseCode() !== 200) {
     throw new Error("SimplifyJobs fetch failed: HTTP " + resp.getResponseCode());
   }
-
-  var md = resp.getContentText();
-  var candidates = [];
-
-  // Parse markdown table rows: | Company | Role | Location | Link | Date |
-  var lines = md.split("\n");
-  lines.forEach(function (line) {
-    if (!line.match(/^\|/)) return;
-    if (line.match(/^\|\s*---/)) return; // header separator
-    if (line.match(/^\|\s*Company/i)) return; // header row
-
-    var cols = line.split("|").map(function (c) { return c.trim(); }).filter(Boolean);
-    if (cols.length < 4) return;
-
-    var company = cols[0].replace(/\*\*/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
-    var role = cols[1].replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
-    var location = cols[2].trim();
-
-    // Extract URL from markdown link in link column or role column
-    var urlMatch = line.match(/\[(?:↗️|🔗|Apply|Link)\]\((https?:\/\/[^)]+)\)/i);
-    if (!urlMatch) {
-      urlMatch = line.match(/\(https?:\/\/[^)]+\)/g);
-      if (urlMatch) {
-        // Get the last URL (usually the apply link)
-        var lastUrl = urlMatch[urlMatch.length - 1];
-        urlMatch = [null, lastUrl.replace(/^\(/, "").replace(/\)$/, "")];
-      }
-    }
-    if (!urlMatch) return;
-
-    var applyUrl = urlMatch[1];
-    if (!applyUrl || applyUrl.indexOf("simplify.jobs") !== -1) return;
-
-    candidates.push({
-      title: company + " - " + role,
-      url: applyUrl,
-      snippet: role + " at " + company + " | " + location,
-      score: "75"
-    });
-  });
-
-  return candidates;
+  return parseSimplifyJobsReadme_(resp.getContentText(), "75");
 }
 
 // ── External Source: newgrad-jobs.com (Airtable Shared Views) ───
@@ -1163,47 +1210,7 @@ function fetchNewGradSimplifyJobsCandidates_(config) {
   if (resp.getResponseCode() !== 200) {
     throw new Error("SimplifyJobs New-Grad fetch failed: HTTP " + resp.getResponseCode());
   }
-
-  var md = resp.getContentText();
-  var candidates = [];
-
-  // Parse markdown table rows: | Company | Role | Location | Link | Date |
-  var lines = md.split("\n");
-  lines.forEach(function (line) {
-    if (!line.match(/^\|/)) return;
-    if (line.match(/^\|\s*---/)) return; // header separator
-    if (line.match(/^\|\s*Company/i)) return; // header row
-
-    var cols = line.split("|").map(function (c) { return c.trim(); }).filter(Boolean);
-    if (cols.length < 4) return;
-
-    var company = cols[0].replace(/\*\*/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
-    var role = cols[1].replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
-    var location = cols[2].trim();
-
-    // Extract URL from markdown link in link column or role column
-    var urlMatch = line.match(/\[(?:↗️|🔗|Apply|Link)\]\((https?:\/\/[^)]+)\)/i);
-    if (!urlMatch) {
-      urlMatch = line.match(/\(https?:\/\/[^)]+\)/g);
-      if (urlMatch) {
-        var lastUrl = urlMatch[urlMatch.length - 1];
-        urlMatch = [null, lastUrl.replace(/^\(/, "").replace(/\)$/, "")];
-      }
-    }
-    if (!urlMatch) return;
-
-    var applyUrl = urlMatch[1];
-    if (!applyUrl || applyUrl.indexOf("simplify.jobs") !== -1) return;
-
-    candidates.push({
-      title: company + " - " + role,
-      url: applyUrl,
-      snippet: role + " at " + company + " | " + location,
-      score: "80"
-    });
-  });
-
-  return candidates;
+  return parseSimplifyJobsReadme_(resp.getContentText(), "80");
 }
 
 function upsertOpportunities_(ss, items) {
@@ -1335,22 +1342,21 @@ function sendResultsEmail_(recipient, ss, items, config, rawItems) {
   var shown = items || [];
   var rawShown = rawItems || [];
   var hasNewGrad = shown.some(function(item) { return item.type === "new_grad"; }) || rawShown.length > 0;
-  var titleSuffix = hasNewGrad ? "job & internship opportunity" + ((shown.length + rawShown.length) === 1 ? "" : "ies") : "Fall 2026 internship" + (shown.length === 1 ? "" : "s");
-  
   var totalCount = shown.length + rawShown.length;
+  var titleSuffix = hasNewGrad ? (totalCount === 1 ? "job & internship opportunity" : "job & internship opportunities") : (totalCount === 1 ? "Fall 2026 internship" : "Fall 2026 internships");
+  
   var subject = config.emailSubjectPrefix + ": " + totalCount + " new " + titleSuffix;
   var sheetUrl = ss.getUrl();
   
   var html = [
-    "<p>Your scout found <strong>" + shown.length + "</strong> new LLM-validated opportunity" + (shown.length === 1 ? "" : "ies") +
+    "<p>Your scout found <strong>" + shown.length + "</strong> new LLM-validated " + (shown.length === 1 ? "opportunity" : "opportunities") +
     (rawShown.length > 0 ? ", plus <strong>" + rawShown.length + "</strong> new unfiltered AI/ML/SWE postings from new grad sources since the last run." : ".") + "</p>",
     "<p><a href=\"" + escapeHtml_(sheetUrl) + "\">Open dashboard in Google Sheets</a></p>"
   ];
   var text = [
-    "Your scout found " + shown.length + " new LLM-validated opportunity(ies)" +
-    (rawShown.length > 0 ? " and " + rawShown.length + " new unfiltered postings from new grad sources." : "."),
-    "",
-    "Dashboard: " + sheetUrl,
+    "Your scout found " + shown.length + " new LLM-validated " + (shown.length === 1 ? "opportunity" : "opportunities") +
+    (rawShown.length > 0 ? ", plus " + rawShown.length + " new unfiltered AI/ML/SWE postings from new grad sources since the last run." : ".") + ".",
+    "Open dashboard in Google Sheets: " + sheetUrl,
     ""
   ];
 
