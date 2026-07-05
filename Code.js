@@ -230,19 +230,21 @@ function runSearch_(opts) {
 
     var previousRawUrls = getPreviousRawUrls_(ss);
     var newRawGradItems = [];
+    var newRawCandidates = [];
     candidates.forEach(function (c) {
-      if (c.query === "newgrad-jobs.com" || c.query === "SimplifyJobs-NewGrad") {
-        var u = normalizeUrl_(c.url || "");
-        if (u && !previousRawUrls[u]) {
+      var u = normalizeUrl_(c.url || "");
+      if (u && !previousRawUrls[u]) {
+        newRawCandidates.push(c);
+        previousRawUrls[u] = true;
+        if (c.query === "newgrad-jobs.com" || c.query === "SimplifyJobs-NewGrad") {
           newRawGradItems.push(c);
-          previousRawUrls[u] = true;
         }
       }
     });
-    Logger.log("Detected " + newRawGradItems.length + " new raw unfiltered postings from the two new grad sources.");
+    Logger.log("Detected " + newRawCandidates.length + " brand new raw URLs across all sources (" + newRawGradItems.length + " from new grad sources).");
 
-    if (String(config.includeRawCandidates || "true") === "true" || newRawGradItems.length > 0) {
-      writeRawCandidates_(ss, runId, candidates);
+    if (String(config.includeRawCandidates || "true") === "true" || newRawCandidates.length > 0) {
+      writeRawCandidates_(ss, runId, newRawCandidates);
     }
 
     Logger.log("Extracting text content from " + limited.length + " page URLs...");
