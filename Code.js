@@ -7,7 +7,7 @@
 
 var APP = {
   name: "Fall 2026 AI Internship Scout",
-  version: "1.0.0",
+  version: "2.0.0",
   sheets: {
     opportunities: "Opportunities",
     runs: "Runs",
@@ -34,7 +34,10 @@ var APP = {
     locationTerms: "San Francisco, Bay Area, Silicon Valley, Remote US, United States",
     roleTerms: "AI, machine learning, ML, MLE, software, SWE, data science, research",
     termTerms: "Fall 2026, part-time, intern, internship, co-op",
-    emailSubjectPrefix: "Fall 2026 AI Internship Scout"
+    emailSubjectPrefix: "Fall 2026 AI Internship Scout",
+    classifyBatchSize: "7",
+    enableInternList: "true",
+    enableSimplifyJobs: "true"
   },
   opportunityHeaders: [
     "id",
@@ -540,6 +543,59 @@ function collectCandidates_(tavilyKey, queries, config) {
       }
     });
   });
+
+  // 4. Enrich from intern-list.com (Airtable shared views)
+  if (String(config.enableInternList || APP.defaults.enableInternList) === "true") {
+    try {
+      var internListResults = fetchInternListCandidates_(config);
+      Logger.log("intern-list.com: Found " + internListResults.length + " candidates");
+      internListResults.forEach(function (result) {
+        var url = normalizeUrl_(result.url || "");
+        if (!url || isExcludedUrl_(url, config)) return;
+        var source = sourceFromUrl_(url);
+        if (source === "Other") return;
+        if (!byUrl[url]) {
+          byUrl[url] = {
+            query: "intern-list.com",
+            title: result.title || "",
+            url: url,
+            source: source,
+            snippet: result.snippet || "",
+            score: result.score || "75"
+          };
+        }
+      });
+    } catch (e) {
+      Logger.log("intern-list.com failed (non-fatal): " + e.message);
+    }
+  }
+
+  // 5. Enrich from SimplifyJobs GitHub
+  if (String(config.enableSimplifyJobs || APP.defaults.enableSimplifyJobs) === "true") {
+    try {
+      var simplifyResults = fetchSimplifyJobsCandidates_(config);
+      Logger.log("SimplifyJobs GitHub: Found " + simplifyResults.length + " candidates");
+      simplifyResults.forEach(function (result) {
+        var url = normalizeUrl_(result.url || "");
+        if (!url || isExcludedUrl_(url, config)) return;
+        var source = sourceFromUrl_(url);
+        if (source === "Other") return;
+        if (!byUrl[url]) {
+          byUrl[url] = {
+            query: "SimplifyJobs",
+            title: result.title || "",
+            url: url,
+            source: source,
+            snippet: result.snippet || "",
+            score: result.score || "75"
+          };
+        }
+      });
+    } catch (e) {
+      Logger.log("SimplifyJobs GitHub failed (non-fatal): " + e.message);
+    }
+  }
+
   return Object.keys(byUrl).map(function (url) { return byUrl[url]; });
 }
 
@@ -582,64 +638,92 @@ function extractCandidatePages_(tavilyKey, candidates, config) {
 }
 
 function classifyPages_(geminiKey, pages, config) {
+  var batchSize = Number(config.classifyBatchSize || APP.defaults.classifyBatchSize);
   var items = [];
-  pages.forEach(function (page, index) {
-    Logger.log("Classifying page [" + (index + 1) + "/" + pages.length + "]: " + page.url);
-    if (index > 0) {
-      Utilities.sleep(5000); // 5-second delay to stay well under the 20 RPM free tier limit
+  var totalBatches = Math.ceil(pages.length / batchSize);
+
+  for (var i = 0; i < pages.length; i += batchSize) {
+    var batch = pages.slice(i, i + batchSize);
+    var batchNum = Math.floor(i / batchSize) + 1;
+    Logger.log("Classifying batch [" + batchNum + "/" + totalBatches + "] (" + batch.length + " pages)...");
+
+    if (i > 0) {
+      Utilities.sleep(5000);
     }
-    var classified = classifyPageWithGemini_(geminiKey, page, config);
+
+    var classified = classifyBatchWithGemini_(geminiKey, batch, config);
     if (!classified) {
-      Logger.log("  -> Failed to classify page or returned empty.");
-      return;
+      Logger.log("  -> Batch classification failed or returned empty.");
+      continue;
     }
-    var rows = Array.isArray(classified.opportunities) ? classified.opportunities : [];
-    if (rows.length === 0) {
-      Logger.log("  -> No opportunities found on this page.");
+
+    var pageResults = Array.isArray(classified.pages) ? classified.pages : [];
+    // Fallback: if model returns old single-page format
+    if (pageResults.length === 0 && Array.isArray(classified.opportunities)) {
+      pageResults = [{ page_url: batch[0].url, opportunities: classified.opportunities }];
     }
-    rows.forEach(function (row) {
-      row.url = normalizeUrl_(row.url || page.url);
-      row.source = row.source || page.source;
-      row.raw_title = page.title;
-      Logger.log("  -> Found: " + row.company + " - " + row.role + " | Track: " + row.track + " | Relevant: " + row.is_relevant + " | Part-time: " + row.part_time + " | Score: " + row.score + " | Reason: " + (row.reason || "none"));
-      if (!isExcludedUrl_(row.url, config)) {
-        items.push(row);
+
+    pageResults.forEach(function (pageResult) {
+      var opps = Array.isArray(pageResult.opportunities) ? pageResult.opportunities : [];
+      var matchedPage = null;
+      batch.forEach(function (p) {
+        if (normalizeUrl_(p.url) === normalizeUrl_(pageResult.page_url || "")) matchedPage = p;
+      });
+      if (!matchedPage && batch.length === 1) matchedPage = batch[0];
+
+      opps.forEach(function (row) {
+        row.url = normalizeUrl_(row.url || (matchedPage ? matchedPage.url : ""));
+        row.source = row.source || (matchedPage ? matchedPage.source : "");
+        row.raw_title = matchedPage ? matchedPage.title : "";
+        Logger.log("  -> Found: " + row.company + " - " + row.role + " | Track: " + row.track + " | Relevant: " + row.is_relevant + " | Part-time: " + row.part_time + " | Score: " + row.score + " | Reason: " + (row.reason || "none"));
+        if (!isExcludedUrl_(row.url, config)) {
+          items.push(row);
+        }
+      });
+
+      if (opps.length === 0 && matchedPage) {
+        Logger.log("  -> No opportunities on: " + matchedPage.url);
       }
     });
-  });
+  }
   return items;
 }
 
-function classifyPageWithGemini_(geminiKey, page, config) {
-  var prompt = [
-    "You are classifying startup internship job pages for a personal internship scout.",
+function classifyBatchWithGemini_(geminiKey, pages, config) {
+  var promptParts = [
+    "You are classifying multiple startup internship job pages for a personal internship scout.",
+    "You will receive " + pages.length + " pages below. Classify EACH page independently.",
     "",
     "Target: STRICTLY part-time or flexible-hour academic-semester internships in AI/ML research, MLE, SWE, or Data Science.",
     "CRITICAL RULE 1 (Part-time): Do NOT assume co-ops or internships are part-time. US/Canada co-ops are typically full-time 40-hour roles. You MUST only mark `is_relevant` as true if the posting explicitly states it is 'part-time', 'flexible hours', '10-20 hours/week', or designed to be completed concurrently with academic classes. If it is a full-time 40 hr/week position, or is silent on part-time flexibility, set `is_relevant` to false and `part_time` to 'No'.",
     "CRITICAL RULE 2 (Technical Role): We ONLY want technical engineering/research roles (AI/ML Research, MLE, SWE, Data Science). If a role is design (e.g. strategic design), finance/investment (e.g. market research, private equity), marketing, advisory, security analysis, operations, or project management, set `is_relevant` to false and track to 'Other'.",
     "Prefer San Francisco, Bay Area, Silicon Valley, Remote US, or US roles. Exclude Workday pages.",
-    "Use the page URL exactly if it is a real application/job page.",
-    "",
-    "Important search inspiration: \"San Francisco\" site:jobs.ashbyhq.com OR site:greenhouse.io OR site:jobs.lever.co \"intern\" \"part-time\" (\"data science\" OR \"AI\" OR \"software\" OR \"Research\")",
+    "Use each page's URL exactly if it is a real application/job page.",
     "",
     "Return ONLY valid JSON matching this shape:",
-    "{\"opportunities\":[{\"is_relevant\":true,\"company\":\"\",\"role\":\"\",\"track\":\"AI Research|MLE|SWE|Data Science|Other\",\"location\":\"\",\"term\":\"Fall 2026|Unknown|Other\",\"part_time\":\"Yes|No|Unknown\",\"url\":\"\",\"source\":\"Ashby|Greenhouse|Lever|Other\",\"details\":\"1-2 sentence summary\",\"visa_sponsorship\":\"Yes|No|Unknown\",\"iitb_alumni\":\"Yes|No|Unknown\",\"score\":0,\"reason\":\"short filtering rationale\"}]}",
+    '{"pages":[{"page_url":"THE_EXACT_PAGE_URL","opportunities":[{"is_relevant":true,"company":"","role":"","track":"AI Research|MLE|SWE|Data Science|Other","location":"","term":"Fall 2026|Unknown|Other","part_time":"Yes|No|Unknown","url":"","source":"Ashby|Greenhouse|Lever|Other","details":"1-2 sentence summary","visa_sponsorship":"Yes|No|Unknown","iitb_alumni":"Yes|No|Unknown","score":0,"reason":"short filtering rationale"}]}]}',
     "",
     "Scoring: 90+ exact part-time or flexible AI/ML/SWE intern match; 75-89 strong part-time/flexible match; below 65 if full-time or irrelevant.",
-    "If no part-time or flexible opportunity exists on the page, return {\"opportunities\":[]}.",
+    "If a page has no part-time or flexible opportunity, return an empty opportunities array for that page.",
+    "You MUST return one entry in the pages array for EACH page below, even if opportunities is empty.",
     "",
     "Config guidance:",
     "Locations: " + config.locationTerms,
     "Roles: " + config.roleTerms,
-    "Terms: " + config.termTerms,
-    "",
-    "Page title: " + page.title,
-    "Page URL: " + page.url,
-    "Source: " + page.source,
-    "",
-    "Page text:",
-    page.content
-  ].join("\n");
+    "Terms: " + config.termTerms
+  ];
+
+  pages.forEach(function (page, idx) {
+    promptParts.push("");
+    promptParts.push("=== PAGE " + (idx + 1) + " of " + pages.length + " ===");
+    promptParts.push("Page title: " + page.title);
+    promptParts.push("Page URL: " + page.url);
+    promptParts.push("Source: " + page.source);
+    promptParts.push("Page text:");
+    promptParts.push(truncate_(page.content, 12000));
+  });
+
+  var prompt = promptParts.join("\n");
 
   var payload = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -654,6 +738,158 @@ function classifyPageWithGemini_(geminiKey, page, config) {
   var text = (((response.candidates || [])[0] || {}).content || {}).parts;
   if (!text || !text[0] || !text[0].text) return null;
   return safeJsonParse_(text[0].text);
+}
+
+// ── External Source: intern-list.com (Airtable Shared Views) ───
+
+function fetchInternListCandidates_(config) {
+  var sources = [
+    { appId: "appjSXAWiVF4d1HoZ", shareId: "shrf04yGbrK3IebAl", label: "AI/ML" },
+    { appId: "appbsiP1flCoaXCSm", shareId: "shreRS1cFLbduwBaU", label: "Data Analysis" },
+    { appId: "appzSWTM1QA543oU", shareId: "shrpvJsQjbhk8l9pi", label: "SWE" }
+  ];
+  var candidates = [];
+
+  sources.forEach(function (src, idx) {
+    if (idx > 0) Utilities.sleep(2000);
+    try {
+      var rows = fetchAirtableSharedView_(src.appId, src.shareId);
+      Logger.log("  intern-list.com " + src.label + ": " + rows.length + " rows");
+      rows.forEach(function (row) {
+        if (row.url) {
+          candidates.push({
+            title: (row.company || "") + " - " + (row.role || ""),
+            url: row.url,
+            snippet: (row.role || "") + " at " + (row.company || "") + " | " + (row.location || ""),
+            score: "75"
+          });
+        }
+      });
+    } catch (e) {
+      Logger.log("  intern-list.com " + src.label + " failed: " + e.message);
+    }
+  });
+
+  return candidates;
+}
+
+function fetchAirtableSharedView_(appId, shareId) {
+  // Step 1: Fetch the embed page to get the signed API URL
+  var embedUrl = "https://airtable.com/embed/" + appId + "/" + shareId;
+  var embedResp = UrlFetchApp.fetch(embedUrl, { muteHttpExceptions: true });
+  if (embedResp.getResponseCode() !== 200) {
+    throw new Error("Airtable embed fetch failed: HTTP " + embedResp.getResponseCode());
+  }
+  var html = embedResp.getContentText();
+
+  // Step 2: Extract the prefetch URL with signed accessPolicy
+  var urlMatch = html.match(/urlWithParams:\s*"(.*?)"/)
+  if (!urlMatch) {
+    throw new Error("Could not find urlWithParams in Airtable embed HTML");
+  }
+  var urlPath = urlMatch[1].replace(/\\u002F/g, "/");
+  var apiUrl = "https://airtable.com" + urlPath;
+
+  // Step 3: Fetch the shared view data
+  var apiResp = UrlFetchApp.fetch(apiUrl, {
+    headers: {
+      "x-time-zone": "America/Los_Angeles",
+      "X-Requested-With": "XMLHttpRequest",
+      "x-airtable-application-id": appId,
+      "x-airtable-inter-service-client": "webClient",
+      "x-user-locale": "en"
+    },
+    muteHttpExceptions: true
+  });
+
+  if (apiResp.getResponseCode() !== 200) {
+    throw new Error("Airtable API HTTP " + apiResp.getResponseCode() + ": " + apiResp.getContentText().substring(0, 200));
+  }
+
+  var apiData = JSON.parse(apiResp.getContentText());
+  var data = apiData.data || {};
+  var rows = data.rows || [];
+  var columns = (data.table || {}).columns || [];
+
+  // Build column ID -> name map
+  var colMap = {};
+  columns.forEach(function (col) {
+    colMap[col.id] = (col.name || "").toLowerCase();
+  });
+
+  // Parse rows into structured objects
+  var results = [];
+  rows.forEach(function (row) {
+    var cells = row.cellValuesByColumnId || {};
+    var parsed = { company: "", role: "", location: "", url: "" };
+    Object.keys(cells).forEach(function (colId) {
+      var name = colMap[colId] || "";
+      var val = cells[colId];
+      if (name.indexOf("company") !== -1) parsed.company = String(val || "");
+      else if (name.indexOf("role") !== -1 || name.indexOf("title") !== -1 || name.indexOf("position") !== -1) parsed.role = String(val || "");
+      else if (name.indexOf("location") !== -1) parsed.location = String(val || "");
+      else if (name.indexOf("link") !== -1 || name.indexOf("url") !== -1 || name.indexOf("apply") !== -1) {
+        if (typeof val === "string") parsed.url = val;
+        else if (val && val.url) parsed.url = val.url;
+        else if (val && val.label) parsed.url = val.label;
+      }
+    });
+    if (parsed.url) results.push(parsed);
+  });
+
+  return results;
+}
+
+// ── External Source: SimplifyJobs GitHub ───────────────────────
+
+function fetchSimplifyJobsCandidates_(config) {
+  var url = "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README-Off-Season.md";
+  var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  if (resp.getResponseCode() !== 200) {
+    throw new Error("SimplifyJobs fetch failed: HTTP " + resp.getResponseCode());
+  }
+
+  var md = resp.getContentText();
+  var candidates = [];
+
+  // Parse markdown table rows: | Company | Role | Location | Link | Date |
+  var lines = md.split("\n");
+  lines.forEach(function (line) {
+    if (!line.match(/^\|/)) return;
+    if (line.match(/^\|\s*---/)) return; // header separator
+    if (line.match(/^\|\s*Company/i)) return; // header row
+
+    var cols = line.split("|").map(function (c) { return c.trim(); }).filter(Boolean);
+    if (cols.length < 4) return;
+
+    var company = cols[0].replace(/\*\*/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
+    var role = cols[1].replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
+    var location = cols[2].trim();
+
+    // Extract URL from markdown link in link column or role column
+    var urlMatch = line.match(/\[(?:↗️|🔗|Apply|Link)\]\((https?:\/\/[^)]+)\)/i);
+    if (!urlMatch) {
+      urlMatch = line.match(/\(https?:\/\/[^)]+\)/g);
+      if (urlMatch) {
+        // Get the last URL (usually the apply link)
+        var lastUrl = urlMatch[urlMatch.length - 1];
+        urlMatch = [null, lastUrl.replace(/^\(/, "").replace(/\)$/, "")];
+      }
+    }
+    if (!urlMatch) return;
+
+    var applyUrl = urlMatch[1];
+    if (!applyUrl || applyUrl.indexOf("simplify.jobs") !== -1) return;
+
+    candidates.push({
+      title: company + " - " + role,
+      url: applyUrl,
+      snippet: role + " at " + company + " | " + location,
+      score: "75"
+    });
+  });
+
+  return candidates;
 }
 
 function upsertOpportunities_(ss, items) {
