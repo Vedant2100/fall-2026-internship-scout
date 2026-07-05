@@ -228,8 +228,21 @@ function runSearch_(opts) {
 
     Logger.log("Found " + candidates.length + " unique candidates. Limiting to " + limited.length + " for extraction.");
 
-    if (String(config.includeRawCandidates || "true") === "true") {
-      writeRawCandidates_(ss, runId, limited);
+    var previousRawUrls = getPreviousRawUrls_(ss);
+    var newRawGradItems = [];
+    candidates.forEach(function (c) {
+      if (c.query === "newgrad-jobs.com" || c.query === "SimplifyJobs-NewGrad") {
+        var u = normalizeUrl_(c.url || "");
+        if (u && !previousRawUrls[u]) {
+          newRawGradItems.push(c);
+          previousRawUrls[u] = true;
+        }
+      }
+    });
+    Logger.log("Detected " + newRawGradItems.length + " new raw unfiltered postings from the two new grad sources.");
+
+    if (String(config.includeRawCandidates || "true") === "true" || newRawGradItems.length > 0) {
+      writeRawCandidates_(ss, runId, candidates);
     }
 
     Logger.log("Extracting text content from " + limited.length + " page URLs...");
@@ -251,13 +264,15 @@ function runSearch_(opts) {
 
     var newItems = upsertOpportunities_(ss, relevant);
     var emailed = false;
-    if (newItems.length > 0) {
-      Logger.log("Sending search results email to " + recipient + " with " + newItems.length + " new items...");
-      sendResultsEmail_(recipient, ss, newItems, config);
-      markEmailed_(ss, newItems);
+    if (newItems.length > 0 || newRawGradItems.length > 0) {
+      Logger.log("Sending search results email to " + recipient + " (LLM items: " + newItems.length + ", Raw New Grad items: " + newRawGradItems.length + ")...");
+      sendResultsEmail_(recipient, ss, newItems, config, newRawGradItems);
+      if (newItems.length > 0) {
+        markEmailed_(ss, newItems);
+      }
       emailed = true;
     } else {
-      Logger.log("No new opportunities to email in this run.");
+      Logger.log("No new opportunities or raw postings to email in this run.");
     }
 
     updateRun_(ss, runRow, {
@@ -265,7 +280,7 @@ function runSearch_(opts) {
       status: "completed",
       queries_run: queries.length,
       urls_checked: limited.length,
-      new_count: newItems.length,
+      new_count: newItems.length + newRawGradItems.length,
       emailed: emailed,
       error: ""
     });
@@ -1241,43 +1256,74 @@ function loadSeen_(ss) {
   return seen;
 }
 
-function sendResultsEmail_(recipient, ss, items, config) {
-  var shown = items; // send all
-  var hasNewGrad = items.some(function(item) { return item.type === "new_grad"; });
-  var titleSuffix = hasNewGrad ? "job & internship opportunity" + (items.length === 1 ? "" : "ies") : "Fall 2026 internship" + (items.length === 1 ? "" : "s");
-  var subject = config.emailSubjectPrefix + ": " + items.length + " new " + titleSuffix;
+function sendResultsEmail_(recipient, ss, items, config, rawItems) {
+  var shown = items || [];
+  var rawShown = rawItems || [];
+  var hasNewGrad = shown.some(function(item) { return item.type === "new_grad"; }) || rawShown.length > 0;
+  var titleSuffix = hasNewGrad ? "job & internship opportunity" + ((shown.length + rawShown.length) === 1 ? "" : "ies") : "Fall 2026 internship" + (shown.length === 1 ? "" : "s");
+  
+  var totalCount = shown.length + rawShown.length;
+  var subject = config.emailSubjectPrefix + ": " + totalCount + " new " + titleSuffix;
   var sheetUrl = ss.getUrl();
+  
   var html = [
-    "<p>Your scout found <strong>" + items.length + "</strong> new " + titleSuffix + ".</p>",
-    "<p><a href=\"" + escapeHtml_(sheetUrl) + "\">Open dashboard in Google Sheets</a></p>",
-    "<ol>"
+    "<p>Your scout found <strong>" + shown.length + "</strong> new LLM-validated opportunity" + (shown.length === 1 ? "" : "ies") +
+    (rawShown.length > 0 ? ", plus <strong>" + rawShown.length + "</strong> new unfiltered AI/ML/SWE postings from new grad sources since the last run." : ".") + "</p>",
+    "<p><a href=\"" + escapeHtml_(sheetUrl) + "\">Open dashboard in Google Sheets</a></p>"
   ];
   var text = [
-    "Your scout found " + items.length + " new " + titleSuffix + ".",
+    "Your scout found " + shown.length + " new LLM-validated opportunity(ies)" +
+    (rawShown.length > 0 ? " and " + rawShown.length + " new unfiltered postings from new grad sources." : "."),
     "",
     "Dashboard: " + sheetUrl,
     ""
   ];
 
-  shown.forEach(function (item) {
-    var typeTag = item.type === "new_grad" ? "[NEW GRAD] " : "[INTERN] ";
-    html.push(
-      "<li><strong>" + typeTag + escapeHtml_(item.company) + " - " + escapeHtml_(item.role) + "</strong><br>" +
-      escapeHtml_(item.location || "") + " | " + escapeHtml_(item.track || "") + " | Score: " + escapeHtml_(String(item.score || "")) + "<br>" +
-      escapeHtml_(item.details || "") + "<br>" +
-      "<a href=\"" + escapeHtml_(item.url) + "\">Apply / view posting</a></li>"
-    );
-    text.push([
-      typeTag + item.company + " - " + item.role,
-      "Location: " + (item.location || ""),
-      "Track: " + (item.track || ""),
-      "Score: " + (item.score || ""),
-      "Details: " + (item.details || ""),
-      "URL: " + item.url,
-      ""
-    ].join("\n"));
-  });
-  html.push("</ol>");
+  if (shown.length > 0) {
+    html.push("<h3>🤖 LLM-Validated Opportunities (" + shown.length + ")</h3>");
+    html.push("<ol>");
+    text.push("=== LLM-VALIDATED OPPORTUNITIES (" + shown.length + ") ===");
+    shown.forEach(function (item) {
+      var typeTag = item.type === "new_grad" ? "[NEW GRAD] " : "[INTERN] ";
+      html.push(
+        "<li><strong>" + typeTag + escapeHtml_(item.company) + " - " + escapeHtml_(item.role) + "</strong><br>" +
+        escapeHtml_(item.location || "") + " | " + escapeHtml_(item.track || "") + " | Score: " + escapeHtml_(String(item.score || "")) + "<br>" +
+        escapeHtml_(item.details || "") + "<br>" +
+        "<a href=\"" + escapeHtml_(item.url) + "\">Apply / view posting</a></li>"
+      );
+      text.push([
+        typeTag + item.company + " - " + item.role,
+        "Location: " + (item.location || ""),
+        "Track: " + (item.track || ""),
+        "Score: " + (item.score || ""),
+        "Details: " + (item.details || ""),
+        "URL: " + item.url,
+        ""
+      ].join("\n"));
+    });
+    html.push("</ol>");
+  }
+
+  if (rawShown.length > 0) {
+    html.push("<h3>⚡ New Unfiltered Postings from New Grad Sources (" + rawShown.length + ")</h3>");
+    html.push("<p><em>Robustly detected since last run (No LLM filtering applied):</em></p>");
+    html.push("<ul>");
+    text.push("=== NEW UNFILTERED POSTINGS FROM NEW GRAD SOURCES (" + rawShown.length + ") ===");
+    rawShown.forEach(function (c) {
+      html.push(
+        "<li><strong>[NEW RAW] " + escapeHtml_(c.title || "New Posting") + "</strong><br>" +
+        escapeHtml_(c.snippet || "") + "<br>" +
+        "<a href=\"" + escapeHtml_(c.url || "") + "\">Apply / view posting</a></li>"
+      );
+      text.push([
+        "[NEW RAW] " + (c.title || "New Posting"),
+        "Details: " + (c.snippet || ""),
+        "URL: " + (c.url || ""),
+        ""
+      ].join("\n"));
+    });
+    html.push("</ul>");
+  }
 
   MailApp.sendEmail({
     to: recipient,
@@ -1316,6 +1362,27 @@ function updateRun_(ss, rowNumber, patch) {
       sheet.getRange(rowNumber, index + 1).setValue(patch[header]);
     }
   });
+}
+
+function getPreviousRawUrls_(ss) {
+  var rawSheet = ss.getSheetByName(APP.sheets.raw);
+  var seenSheet = ss.getSheetByName(APP.sheets.seen);
+  var seenUrls = {};
+  if (rawSheet && rawSheet.getLastRow() > 1) {
+    var rawValues = rawSheet.getRange(2, 4, rawSheet.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < rawValues.length; i++) {
+      var u1 = normalizeUrl_(rawValues[i][0] || "");
+      if (u1) seenUrls[u1] = true;
+    }
+  }
+  if (seenSheet && seenSheet.getLastRow() > 1) {
+    var seenValues = seenSheet.getRange(2, 2, seenSheet.getLastRow() - 1, 1).getValues();
+    for (var j = 0; j < seenValues.length; j++) {
+      var u2 = normalizeUrl_(seenValues[j][0] || "");
+      if (u2) seenUrls[u2] = true;
+    }
+  }
+  return seenUrls;
 }
 
 function writeRawCandidates_(ss, runId, candidates) {
