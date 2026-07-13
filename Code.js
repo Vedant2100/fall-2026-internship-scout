@@ -23,9 +23,9 @@ var APP = {
   },
   defaults: {
     searchScheduleHour: "8",
-    maxUrlsPerRun: "45",
+    maxUrlsPerRun: "80",
     maxNewEmailItems: "20",
-    minScore: "65",
+    minScore: "80",
     searchDepth: "basic",
     extractDepth: "basic",
     geminiModel: "gemini-3.1-flash-lite",
@@ -40,7 +40,12 @@ var APP = {
     enableSimplifyJobs: "true",
     enableNewGradJobs: "true",
     enableNewGradSimplify: "true",
-    newGradSearchQueries: "true"
+    newGradSearchQueries: "true",
+    enableWellfound: "true",
+    enableYCombinator: "true",
+    enableJobright: "true",
+    digestIntervalDays: "2",
+    digestMaxItems: "25"
   },
   opportunityHeaders: [
     "id",
@@ -85,10 +90,12 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Internship Scout")
     .addItem("Run Search Now", "runSearchNow")
+    .addItem("Send Digest Now", "sendDigestNow")
     .addItem("Setup / Repair Dashboard", "setupDashboard")
     .addItem("Clear Existing Data", "clearScoutData")
     .addSeparator()
     .addItem("Install Daily Trigger", "installDailyTrigger")
+    .addItem("Install Digest Trigger (every 2 days)", "installDigestTrigger")
     .addItem("Remove Triggers", "removeScoutTriggers")
     .addSeparator()
     .addItem("Send Test Email", "sendTestEmail")
@@ -159,10 +166,142 @@ function installDailyTrigger() {
 function removeScoutTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (trigger) {
     var handler = trigger.getHandlerFunction();
-    if (handler === "runScheduledSearch") {
+    if (handler === "runScheduledSearch" || handler === "runScheduledDigest") {
       ScriptApp.deleteTrigger(trigger);
     }
   });
+}
+
+function installDigestTrigger() {
+  var ss = getSpreadsheet_();
+  ensureWorkbook_(ss);
+  var config = readConfig_(ss);
+  var intervalDays = Number(config.digestIntervalDays || APP.defaults.digestIntervalDays);
+  // Remove existing digest triggers
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === "runScheduledDigest") {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+  ScriptApp.newTrigger("runScheduledDigest")
+    .timeBased()
+    .everyDays(intervalDays)
+    .atHour(9)
+    .create();
+  SpreadsheetApp.getUi().alert("Digest trigger installed! You will receive a top-opportunities recap email every " + intervalDays + " days at 9 AM.");
+}
+
+function runScheduledDigest() {
+  sendDigestEmail_();
+}
+
+function sendDigestNow() {
+  sendDigestEmail_();
+  SpreadsheetApp.getUi().alert("Digest email sent!");
+}
+
+function sendDigestEmail_() {
+  var ss = getSpreadsheet_();
+  var config = readConfig_(ss);
+  var recipient = getRequiredProperty_(APP.props.recipientEmail);
+  var minScore = Number(config.minScore || APP.defaults.minScore);
+  var maxItems = Number(config.digestMaxItems || APP.defaults.digestMaxItems);
+  var sheetUrl = ss.getUrl();
+
+  var oppSheet = ss.getSheetByName(APP.sheets.opportunities);
+  if (!oppSheet || oppSheet.getLastRow() <= 1) {
+    Logger.log("Digest: No opportunities to send.");
+    return;
+  }
+
+  var values = oppSheet.getDataRange().getValues();
+  var headers = values[0];
+  var rows = values.slice(1);
+
+  // Build objects and filter by score >= minScore, status != "Rejected"
+  var opps = [];
+  rows.forEach(function (row) {
+    var obj = {};
+    headers.forEach(function (h, i) { obj[h] = row[i]; });
+    var score = Number(obj.score || 0);
+    var status = String(obj.status || "").toLowerCase();
+    if (score >= minScore && status !== "rejected") {
+      opps.push(obj);
+    }
+  });
+
+  // Sort by score descending, then by found_at descending
+  opps.sort(function (a, b) {
+    var ds = Number(b.score || 0) - Number(a.score || 0);
+    if (ds !== 0) return ds;
+    var da = new Date(b.found_at || 0);
+    var db = new Date(a.found_at || 0);
+    return da - db;
+  });
+
+  opps = opps.slice(0, maxItems);
+
+  if (opps.length === 0) {
+    Logger.log("Digest: No opportunities above minScore " + minScore + ".");
+    return;
+  }
+
+  // Separate starred, not-yet-applied, and the rest
+  var starred = opps.filter(function (o) { return o.starred === true; });
+  var unapplied = opps.filter(function (o) { return o.starred !== true && o.applied !== true; });
+  var applied = opps.filter(function (o) { return o.applied === true; });
+
+  var subject = config.emailSubjectPrefix + " Digest: Your top " + opps.length + " opportunities";
+
+  var html = [
+    "<p>Here is your periodic digest of <strong>" + opps.length + "</strong> top-scored opportunities (score ≥ " + minScore + ").</p>",
+    "<p><a href=\"" + escapeHtml_(sheetUrl) + "\">Open dashboard in Google Sheets</a></p>"
+  ];
+  var text = [
+    "Here is your periodic digest of " + opps.length + " top-scored opportunities (score >= " + minScore + ").",
+    "Open dashboard: " + sheetUrl,
+    ""
+  ];
+
+  // Render a section
+  function renderSection(title, emoji, list) {
+    if (list.length === 0) return;
+    html.push("<h3>" + emoji + " " + title + " (" + list.length + ")</h3>");
+    html.push("<ol>");
+    text.push("=== " + title.toUpperCase() + " (" + list.length + ") ===");
+    list.forEach(function (item) {
+      var typeTag = item.type === "new_grad" ? "[NEW GRAD] " : "[INTERN] ";
+      var appliedTag = item.applied === true ? " ✅ Applied" : "";
+      var starTag = item.starred === true ? " ⭐" : "";
+      html.push(
+        "<li><strong>" + typeTag + escapeHtml_(String(item.company || "")) + " - " + escapeHtml_(String(item.role || "")) + starTag + appliedTag + "</strong><br>" +
+        escapeHtml_(String(item.location || "")) + " | " + escapeHtml_(String(item.track || "")) + " | Score: " + escapeHtml_(String(item.score || "")) + "<br>" +
+        escapeHtml_(String(item.details || "")) + "<br>" +
+        "<a href=\"" + escapeHtml_(String(item.url || "")) + "\">Apply / view posting</a></li>"
+      );
+      text.push([
+        typeTag + (item.company || "") + " - " + (item.role || "") + starTag + appliedTag,
+        "Score: " + (item.score || "") + " | " + (item.location || ""),
+        "URL: " + (item.url || ""),
+        ""
+      ].join("\n"));
+    });
+    html.push("</ol>");
+  }
+
+  renderSection("Starred Opportunities", "⭐", starred);
+  renderSection("Not Yet Applied", "🎯", unapplied);
+  renderSection("Already Applied", "✅", applied);
+
+  html.push("<hr><p><em>This digest is sent every " + (config.digestIntervalDays || APP.defaults.digestIntervalDays) + " days. Adjust frequency in your Config sheet (digestIntervalDays).</em></p>");
+
+  MailApp.sendEmail({
+    to: recipient,
+    subject: subject,
+    htmlBody: html.join("\n"),
+    body: text.join("\n")
+  });
+  Logger.log("Digest email sent to " + recipient + " with " + opps.length + " opportunities.");
 }
 
 function sendTestEmail() {
@@ -444,26 +583,71 @@ function readConfig_(ss) {
 }
 
 function buildSearchQueries_(config) {
-  var baseSites = '(site:jobs.ashbyhq.com OR site:greenhouse.io OR site:jobs.lever.co)';
-  var pt = '("part-time" OR "part time" OR "during semester" OR co-op OR "flexible hours" OR "flexible schedule")';
-  var queries = [
-    { q: '"San Francisco" ' + baseSites + ' "intern" ' + pt + ' ("data science" OR "AI" OR "software" OR "Research") -workday', type: 'intern' },
-    { q: '"Fall 2026" "part-time" "AI intern" "San Francisco" site:jobs.ashbyhq.com -workday', type: 'intern' },
-    { q: '"Fall 2026" ("part time" OR "flexible hours") "machine learning intern" "Bay Area" site:jobs.lever.co -workday', type: 'intern' },
-    { q: '"research intern" ("part-time" OR "flexible") "Fall 2026" "AI" "San Francisco" site:greenhouse.io -workday', type: 'intern' },
-    { q: '"software engineer intern" "Fall 2026" "part-time" "AI" site:jobs.ashbyhq.com -workday', type: 'intern' },
-    { q: '"MLE intern" ("part-time" OR "flexible schedule") "Fall 2026" "San Francisco" site:jobs.lever.co -workday', type: 'intern' },
-    { q: '"machine learning research intern" ("part time" OR "flexible") "Fall 2026" "startup" "San Francisco" -workday', type: 'intern' },
-    { q: '"AI research intern" "part-time" "Fall 2026" "Bay Area" -workday', type: 'intern' },
-    { q: '"software intern" ("part-time" OR co-op OR flexible) "AI" "Fall 2026" "San Francisco" site:greenhouse.io -workday', type: 'intern' },
-    { q: '"data science intern" "Fall 2026" ("part-time" OR flexible) "San Francisco" site:jobs.lever.co -workday', type: 'intern' }
+  var ats = '(site:jobs.ashbyhq.com OR site:greenhouse.io OR site:jobs.lever.co)';
+
+  // ── Core queries: run every single day (7 queries) ──────────────────────
+  var core = [
+    { q: '("intern" OR "internship") ("AI" OR "machine learning" OR "ML" OR "research") ' + ats + ' -workday', type: 'intern' },
+    { q: '("intern" OR "internship") ("software engineer" OR "SWE" OR "data science") ' + ats + ' -workday', type: 'intern' },
+    { q: '("part-time" OR "part time" OR "flexible" OR co-op) "intern" ("AI" OR "software") "San Francisco" -workday', type: 'intern' },
   ];
+
   if (String(config.newGradSearchQueries || APP.defaults.newGradSearchQueries) === "true") {
-    queries.push({ q: '"new grad" OR "entry level" site:jobs.ashbyhq.com ("AI" OR "machine learning" OR "research") ("Bay Area" OR "San Francisco") -workday', type: 'new_grad' });
-    queries.push({ q: '"new grad" OR "university grad" site:greenhouse.io ("AI" OR "ML" OR "software engineer" OR "research") -workday', type: 'new_grad' });
-    queries.push({ q: '"new grad" site:jobs.lever.co ("research" OR "AI" OR "data science") ("San Francisco" OR "remote") -workday', type: 'new_grad' });
+    core.push({ q: '("new grad" OR "new graduate" OR "entry level") ("AI" OR "machine learning" OR "research") ' + ats + ' -workday', type: 'new_grad' });
+    core.push({ q: '("new grad" OR "new graduate" OR "entry level") ("software engineer" OR "SWE") ' + ats + ' -workday', type: 'new_grad' });
+    core.push({ q: '"new grad" ("AI" OR "ML" OR "software") ("San Francisco" OR "Bay Area" OR "Remote") -workday', type: 'new_grad' });
   }
-  return queries;
+
+  // ── Rotating queries: different set each day (8 per day, pool of 32) ────
+  var pool = [
+    // Set 0 — Wellfound + specific ATS + broad
+    { q: '"intern" ("AI" OR "ML") site:wellfound.com ("San Francisco" OR "Remote") -workday', type: 'intern' },
+    { q: '"intern" ("software" OR "AI") site:jobright.ai "San Francisco" -workday', type: 'intern' },
+    { q: '"part-time" "intern" "AI" site:jobs.ashbyhq.com -workday', type: 'intern' },
+    { q: '"research intern" site:greenhouse.io ("San Francisco" OR "Bay Area") -workday', type: 'intern' },
+    { q: '"Fall 2026" "intern" ("machine learning" OR "AI") -workday', type: 'intern' },
+    { q: '"new grad" ("AI" OR "software") site:wellfound.com -workday', type: 'new_grad' },
+    { q: '"AI research intern" ("part-time" OR "flexible") ("Bay Area" OR "San Francisco") -workday', type: 'intern' },
+    { q: '"new grad" "software engineer" site:jobright.ai ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
+
+    // Set 1 — Lever focus + data science + startups
+    { q: '"intern" "research" site:jobs.lever.co ("Bay Area" OR "San Francisco") -workday', type: 'intern' },
+    { q: '"software intern" site:greenhouse.io ("San Francisco" OR "startup") -workday', type: 'intern' },
+    { q: '("MLE" OR "machine learning engineer") "intern" site:jobs.ashbyhq.com -workday', type: 'intern' },
+    { q: '"AI intern" site:jobright.ai ("Bay Area" OR "San Francisco") -workday', type: 'intern' },
+    { q: '"new grad" "software" site:jobs.lever.co ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
+    { q: '"data science intern" ("AI" OR "ML") ("San Francisco" OR "Bay Area") -workday', type: 'intern' },
+    { q: '"software engineer intern" ("part-time" OR "co-op") ("AI" OR "startup") -workday', type: 'intern' },
+    { q: '"new grad" ("machine learning" OR "deep learning") site:greenhouse.io -workday', type: 'new_grad' },
+
+    // Set 2 — LLM/NLP/GenAI focus + YC + vision
+    { q: '"intern" ("LLM" OR "NLP" OR "generative AI") site:greenhouse.io -workday', type: 'intern' },
+    { q: '"intern" ("reinforcement learning" OR "computer vision") site:jobs.ashbyhq.com -workday', type: 'intern' },
+    { q: '"software engineer intern" site:jobs.lever.co "startup" "San Francisco" -workday', type: 'intern' },
+    { q: '"new grad" "machine learning" site:greenhouse.io ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
+    { q: '"intern" ("AI" OR "software") site:workatastartup.com -workday', type: 'intern' },
+    { q: '("part-time" OR "flexible") "software" "intern" ("Bay Area" OR "San Francisco") -workday', type: 'intern' },
+    { q: '"intern" ("agentic" OR "RAG" OR "retrieval") ("AI" OR "ML") -workday', type: 'intern' },
+    { q: '"new grad" ("AI" OR "research") site:jobs.ashbyhq.com ("Remote" OR "US") -workday', type: 'new_grad' },
+
+    // Set 3 — Deep learning + co-op + remote + alternate platforms
+    { q: '"intern" ("deep learning" OR "neural network" OR "transformer") site:greenhouse.io -workday', type: 'intern' },
+    { q: '("co-op" OR "flexible hours") "intern" "AI" "San Francisco" -workday', type: 'intern' },
+    { q: '"research assistant" ("AI" OR "ML") ("San Francisco" OR "Bay Area") site:jobs.lever.co -workday', type: 'intern' },
+    { q: '"new grad" ("AI" OR "ML") site:jobs.ashbyhq.com ("Remote" OR "San Francisco") -workday', type: 'new_grad' },
+    { q: '"intern" "software" site:wellfound.com ("Bay Area" OR "Remote") -workday', type: 'intern' },
+    { q: '"new grad" site:jobright.ai ("software" OR "AI") ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
+    { q: '"ML intern" OR "AI intern" ("part time" OR "part-time") 2026 -workday', type: 'intern' },
+    { q: '"new grad" ("software engineer" OR "research") site:workatastartup.com -workday', type: 'new_grad' }
+  ];
+
+  // Pick 8 rotating queries based on day-of-year (cycles through all 4 sets)
+  var dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
+  var setIndex = dayOfYear % 4;
+  var rotating = pool.slice(setIndex * 8, setIndex * 8 + 8);
+
+  Logger.log("Query rotation: set " + setIndex + " (day " + dayOfYear + "), " + core.length + " core + " + rotating.length + " rotating queries");
+  return core.concat(rotating);
 }
 
 function searchGoogleCustomSearch_(query, gKey, gCx) {
@@ -590,7 +774,6 @@ function collectCandidates_(tavilyKey, queries, config) {
       var url = normalizeUrl_(result.url || "");
       if (!url || isExcludedUrl_(url, config)) return;
       var source = sourceFromUrl_(url);
-      if (source === "Other") return; // Keep ONLY direct Greenhouse, Ashby, and Lever application pages
 
       if (!byUrl[url]) {
         byUrl[url] = {
@@ -615,7 +798,6 @@ function collectCandidates_(tavilyKey, queries, config) {
         var url = normalizeUrl_(result.url || "");
         if (!url || isExcludedUrl_(url, config)) return;
         var source = sourceFromUrl_(url);
-        if (source === "Other") return;
         if (!byUrl[url]) {
           byUrl[url] = {
             query: "intern-list.com",
@@ -642,7 +824,6 @@ function collectCandidates_(tavilyKey, queries, config) {
         var url = normalizeUrl_(result.url || "");
         if (!url || isExcludedUrl_(url, config)) return;
         var source = sourceFromUrl_(url);
-        if (source === "Other") return;
         if (!byUrl[url]) {
           byUrl[url] = {
             query: "SimplifyJobs",
@@ -669,7 +850,6 @@ function collectCandidates_(tavilyKey, queries, config) {
         var url = normalizeUrl_(result.url || "");
         if (!url || isExcludedUrl_(url, config)) return;
         var source = sourceFromUrl_(url);
-        if (source === "Other") return;
         if (!byUrl[url]) {
           byUrl[url] = {
             query: "newgrad-jobs.com",
@@ -696,7 +876,6 @@ function collectCandidates_(tavilyKey, queries, config) {
         var url = normalizeUrl_(result.url || "");
         if (!url || isExcludedUrl_(url, config)) return;
         var source = sourceFromUrl_(url);
-        if (source === "Other") return;
         if (!byUrl[url]) {
           byUrl[url] = {
             query: "SimplifyJobs-NewGrad",
@@ -867,7 +1046,7 @@ function classifyBatchWithGemini_(geminiKey, pages, config) {
     "Return ONLY valid JSON matching this shape:",
     '{"pages":[{"page_url":"THE_EXACT_PAGE_URL","opportunities":[{"is_relevant":true,"company":"","role":"","track":"AI Research|MLE|SWE|Data Science|Other","location":"","term":"Fall 2026|Unknown|Other","part_time":"Yes|No|Unknown","url":"","source":"Ashby|Greenhouse|Lever|Other","details":"1-2 sentence summary connecting role to candidate profile","visa_sponsorship":"Yes|No|Unknown","iitb_alumni":"Yes|No|Unknown","score":0,"reason":"short filtering rationale"}]}]}',
     "",
-    "Scoring: 90+ exact part-time or flexible AI/ML/SWE intern match aligned with candidate profile; 75-89 strong part-time/flexible match; below 65 if full-time, lab biology/hardware, or irrelevant.",
+    "Scoring: 90+ exact part-time or flexible AI/ML/SWE intern match aligned with candidate profile; 80-89 strong part-time/flexible match; below 80 if full-time, lab biology/hardware, or irrelevant.",
     "If a page has no part-time or flexible opportunity, return an empty opportunities array for that page.",
     "You MUST return one entry in the pages array for EACH page below, even if opportunities is empty.",
     "",
@@ -926,7 +1105,7 @@ function classifyNewGradBatchWithGemini_(geminiKey, pages, config) {
     "- 90-94: SWE / AI / ML / DS new grad role at Big Tech (Google, Apple, Meta, Microsoft, Amazon, Tesla, NVIDIA) in San Francisco / Bay Area.",
     "- 80-89: SWE / ML new grad role at a well-known tech startup or standard tech company in Bay Area or Remote US aligned with candidate skills.",
     "- 70-79: Standard technical new grad role in other US locations.",
-    "- Below 65: Irrelevant, lab biology/hardware, or requires 3+ years experience.",
+    "- Below 80: Standard technical role in non-target geographies, irrelevant, lab biology/hardware, or requires 3+ years experience.",
     "",
     "Prefer San Francisco, Bay Area, Silicon Valley, Remote US, or US roles. Exclude Workday pages.",
     "Use each page's URL exactly if it is a real application/job page.",
@@ -1642,6 +1821,11 @@ function sourceFromUrl_(url) {
   if (lower.indexOf("ashbyhq.com") !== -1) return "Ashby";
   if (lower.indexOf("greenhouse.io") !== -1) return "Greenhouse";
   if (lower.indexOf("lever.co") !== -1) return "Lever";
+  if (lower.indexOf("wellfound.com") !== -1) return "Wellfound";
+  if (lower.indexOf("jobright.ai") !== -1) return "Jobright";
+  if (lower.indexOf("workatastartup.com") !== -1) return "YC";
+  if (lower.indexOf("linkedin.com") !== -1) return "LinkedIn";
+  if (lower.indexOf("indeed.com") !== -1) return "Indeed";
   return "Other";
 }
 
