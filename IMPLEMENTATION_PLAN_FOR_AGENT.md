@@ -2,12 +2,12 @@
 
 ## Objective
 
-Build and deploy a serious clone of the original Dreamer internship scout using Google Apps Script and Google Sheets.
+Build and deploy a serious full-time early-career AI job scout using Google Apps Script and Google Sheets.
 
-The new scout must search for **Fall 2026 part-time internships** in AI/ML research, SWE, MLE, and data science. It should take inspiration from this search:
+The new scout must search for **full-time new-grad and early-career roles** in AI/ML research, research engineering, SWE, MLE, and data science. It should take inspiration from searches like:
 
 ```text
-"San Francisco" site:jobs.ashbyhq.com OR site:greenhouse.io OR site:jobs.lever.co "intern" ("data science" OR "AI" OR "software" OR "Research")
+"new grad" site:jobs.ashbyhq.com OR site:greenhouse.io OR site:jobs.lever.co ("AI" OR "machine learning" OR "software" OR "research engineer")
 ```
 
 It must exclude Workday.
@@ -42,7 +42,7 @@ It must exclude Workday.
 
 3. Search
    - Use Ashby, Greenhouse, and Lever-focused queries.
-   - Search for Fall 2026, part-time, AI/ML research, SWE, MLE, data science internships.
+   - Search for full-time new-grad/early-career AI/ML research, research engineering, SWE, MLE, and data science roles.
    - Exclude Workday by query and URL filtering.
 
 4. Classification
@@ -87,4 +87,3 @@ It must exclude Workday.
 - If Gemini output occasionally fails JSON parse, add retry with stricter prompt.
 - If Tavily misses too much, add specific company career pages and YC company lists as seed URLs.
 - If user wants a prettier UI, publish `doGet` as a web app or build a small frontend later.
-

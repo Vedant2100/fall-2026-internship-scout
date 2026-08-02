@@ -30,7 +30,7 @@
         <article class="card">
           <strong><?= item.company ?> - <?= item.role ?></strong>
           <div class="meta">
-            <?= item.location ?> | <?= item.track ?> | Part-time: <?= item.part_time ?> | Score: <?= item.score ?>
+            <?= item.location ?> | <?= item.track ?> | Full-time: <?= item.type === 'new_grad' ? 'Yes' : 'Legacy' ?> | Score: <?= item.score ?>
           </div>
           <div><?= item.details ?></div>
           <a href="<?= item.url ?>" target="_blank">View posting</a>
@@ -39,4 +39,3 @@
     </main>
   </body>
 </html>
-

@@ -1,8 +1,8 @@
 {
-  "name": "fall-2026-internship-scout",
+  "name": "full-time-ai-job-scout",
   "version": "1.0.0",
   "private": true,
-  "description": "Google Apps Script + Sheets internship scout for Fall 2026 AI/ML research, SWE, and MLE roles.",
+  "description": "Google Apps Script + Sheets scout for full-time early-career AI/ML research, SWE, and MLE roles.",
   "scripts": {
     "lint:json": "node -e \"JSON.parse(require('fs').readFileSync('appsscript.json','utf8')); JSON.parse(require('fs').readFileSync('.clasp.json.example','utf8')); console.log('json ok')\"",
     "check": "npm run lint:json"
@@ -11,4 +11,3 @@
     "@google/clasp": "^3.0.6-alpha"
   }
 }
-

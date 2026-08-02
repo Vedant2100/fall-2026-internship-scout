@@ -13,7 +13,7 @@ Create or gather:
 
 ## Google Sheet
 
-1. Create a Google Sheet named `Fall 2026 AI Internship Scout`.
+1. Create or reuse a Google Sheet named `Full-Time AI Job Scout`.
 2. Open `Extensions -> Apps Script`.
 3. Add these files:
    - `Code.js`
@@ -42,14 +42,14 @@ Run these functions manually from the Apps Script editor:
 3. `sendTestEmail`
 4. `runSearchNow`
 
-Then reload the Google Sheet and use the custom `Internship Scout` menu.
+Then reload the Google Sheet and use the custom `Job Scout` menu.
 
 ## Schedule
 
 After the first manual run works:
 
 1. Open the Sheet.
-2. Click `Internship Scout -> Install Daily Trigger`.
+2. Click `Job Scout -> Install Daily Trigger`.
 3. Confirm future runs appear in the `Runs` tab.
 
 ## First-Run Tuning
@@ -82,6 +82,5 @@ maxUrlsPerRun=45
 - No email: run `sendTestEmail`, then check Gmail sent mail and spam.
 - Timeout: lower `maxUrlsPerRun`.
 - Bad JSON from Gemini: rerun; if repeated, lower `maxUrlsPerRun` and inspect Apps Script logs.
-- Too many irrelevant jobs: raise `minScore` to `75`.
+- Too many irrelevant jobs: raise `minScore` to `85`.
 - Missing good jobs: lower `minScore` or add more queries in `buildSearchQueries_`.
-

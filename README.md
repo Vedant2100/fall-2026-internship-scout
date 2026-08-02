@@ -1,15 +1,18 @@
-# Fall 2026 AI Internship Scout
+# Full-Time AI Job Scout
 
-Google Apps Script + Google Sheets clone of the Dreamer `AI Startup Internship Scout`.
+Google Apps Script + Google Sheets job scout for Vedant's full-time early-career search.
 
-It searches for **Fall 2026 part-time internships** in:
+It searches for **full-time new-grad and early-career roles** in:
 
 - AI/ML research
+- Research engineering
 - Machine learning engineering
 - Software engineering
 - Data science
 
-It emphasizes San Francisco / Bay Area / Remote US roles, uses Ashby/Greenhouse/Lever-style job pages, excludes Workday, dedupes results, writes a Google Sheets dashboard, and emails only newly found opportunities.
+It emphasizes San Francisco / Pleasanton / Bay Area / Remote US roles, uses Ashby/Greenhouse/Lever-style job pages plus early-career aggregators, excludes Workday, dedupes results, writes a Google Sheets dashboard, and emails only newly found opportunities.
+
+Internships, co-ops, and part-time roles are no longer accepted by the active search pipeline. Existing internship rows remain in the Sheet as history.
 
 ## Why This Exists
 
@@ -95,7 +98,7 @@ It also filters Workday-like URLs in code.
 
 This is the fastest path.
 
-1. Create a new Google Sheet named `Fall 2026 AI Internship Scout`.
+1. Create or reuse a Google Sheet named `Full-Time AI Job Scout`.
 2. Open `Extensions -> Apps Script`.
 3. Copy these repo files into the Apps Script editor:
    - `Code.js`
@@ -110,9 +113,9 @@ This is the fastest path.
 6. Run `setupDashboard`.
 7. Approve scopes.
 8. Reload the Google Sheet.
-9. Use `Internship Scout -> Send Test Email`.
-10. Use `Internship Scout -> Run Search Now`.
-11. Use `Internship Scout -> Install Daily Trigger`.
+9. Use `Job Scout -> Send Test Email`.
+10. Use `Job Scout -> Run Search Now`.
+11. Use `Job Scout -> Install Daily Trigger`.
 
 ## Setup With clasp
 
@@ -156,6 +159,7 @@ After setup, the Google Sheet menu includes:
 Open the `Config` tab to tune:
 
 - `searchScheduleHour`
+- `searchDays` (default: 30, so evergreen job postings are not missed by a one-week freshness filter)
 - `maxUrlsPerRun`
 - `maxNewEmailItems`
 - `minScore`
@@ -166,3 +170,4 @@ Open the `Config` tab to tune:
 
 Start with `maxUrlsPerRun = 20` for the first real run. Increase after confirming quota and runtime.
 
+The classifier uses the candidate's expected December 2026 graduation, F-1/OPT context, CompFly agent-governance/observability experience, prior data-science experience, and research/LLM background. It treats sponsorship as unknown unless the job posting explicitly provides evidence.
