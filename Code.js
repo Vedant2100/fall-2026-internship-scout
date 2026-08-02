@@ -1807,11 +1807,17 @@ function sourceFromUrl_(url) {
 }
 
 function normalizeCompanyRole_(company, role) {
-  return [company || "", role || ""]
-    .join("|||")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
+  var c = String(company || "").toLowerCase().replace(/[^a-z0-9]/g, "").replace(/(inc|llc|corp|ltd)$/, "");
+  var r = String(role || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  
+  // Normalize common engineering abbreviations
+  r = r.replace(/swe|sde/g, "softwareengineer")
+       .replace(/mle/g, "machinelearningengineer")
+       .replace(/ml/g, "machinelearning")
+       .replace(/ai/g, "artificialintelligence")
+       .replace(/internship/g, "intern");
+
+  return c + "|||" + r;
 }
 
 function fingerprint_(url, companyRole) {
