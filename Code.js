@@ -715,82 +715,99 @@ function collectCandidates_(tavilyKey, queries, config) {
   var gKey = props.getProperty("GSEARCH_API_KEY") || props.getProperty("GOOGLE_SEARCH_API_KEY");
   var gCx = props.getProperty("GSEARCH_CX") || props.getProperty("GOOGLE_SEARCH_CX");
 
+  var requests = [];
+  var metaList = [];
+
   queries.forEach(function (queryObj) {
     var qStr = typeof queryObj === "string" ? queryObj : queryObj.q;
     var qType = typeof queryObj === "string" ? "intern" : (queryObj.type || "intern");
-    var results = [];
-    var usedSearchEngine = false;
 
-    // 1. Try Serper.dev (Google Search API)
     if (serperKey) {
-      try {
-        results = searchSerper_(qStr, serperKey);
-        usedSearchEngine = true;
-      } catch (e) {
-        Logger.log("Serper Search failed for query [" + qStr + "], trying fallback: " + e.message);
-      }
+      requests.push({
+        url: "https://google.serper.dev/search",
+        method: "post",
+        contentType: "application/json",
+        headers: { "X-API-KEY": serperKey },
+        payload: JSON.stringify({ q: qStr, num: 10, tbs: "qdr:w" }),
+        muteHttpExceptions: true
+      });
+      metaList.push({ engine: "serper", qStr: qStr, qType: qType });
+    } else if (gKey && gCx) {
+      var gUrl = "https://www.googleapis.com/customsearch/v1?key=" + encodeURIComponent(gKey) +
+                 "&cx=" + encodeURIComponent(gCx) +
+                 "&q=" + encodeURIComponent(qStr) + "&num=10&dateRestrict=w1";
+      requests.push({
+        url: gUrl,
+        method: "get",
+        muteHttpExceptions: true
+      });
+      metaList.push({ engine: "gsearch", qStr: qStr, qType: qType });
+    } else if (tavilyKey) {
+      var tPayload = {
+        query: qStr,
+        search_depth: String(config.searchDepth || APP.defaults.searchDepth),
+        max_results: 10,
+        days: 7,
+        include_answer: false,
+        include_raw_content: false
+      };
+      requests.push({
+        url: "https://api.tavily.com/search",
+        method: "post",
+        contentType: "application/json",
+        headers: {
+          "Authorization": "Bearer " + tavilyKey,
+          "Content-Type": "application/json"
+        },
+        payload: JSON.stringify(tPayload),
+        muteHttpExceptions: true
+      });
+      metaList.push({ engine: "tavily", qStr: qStr, qType: qType });
     }
-
-    // 2. Try Google Custom Search (secondary)
-    if (!usedSearchEngine && gKey && gCx) {
-      try {
-        results = searchGoogleCustomSearch_(qStr, gKey, gCx);
-        usedSearchEngine = true;
-      } catch (e) {
-        Logger.log("Google Custom Search failed for query [" + qStr + "], trying fallback: " + e.message);
-      }
-    }
-
-    // 3. Try Tavily Search (tertiary fallback)
-    if (!usedSearchEngine || results.length === 0) {
-      try {
-        var payload = {
-          query: qStr,
-          search_depth: String(config.searchDepth || APP.defaults.searchDepth),
-          max_results: 10,
-          days: 7,
-          include_answer: false,
-          include_raw_content: false
-        };
-        var response = tavilyPost_("/search", tavilyKey, payload);
-        var tResults = response.results || [];
-        results = tResults.map(function(r) {
-          return {
-            title: r.title || "",
-            url: r.url || "",
-            snippet: r.content || r.snippet || "",
-            score: r.score || ""
-          };
-        });
-      } catch (e) {
-        Logger.log("Tavily search failed for query [" + qStr + "]: " + e.message);
-      }
-    }
-
-    var engineName = "Tavily";
-    if (usedSearchEngine) {
-      engineName = serperKey ? "Serper.dev" : "Google Custom Search";
-    }
-    Logger.log("Query [" + qStr + "] -> Found " + results.length + " candidates using " + engineName);
-
-    results.forEach(function (result) {
-      var url = normalizeUrl_(result.url || "");
-      if (!url || isExcludedUrl_(url, config)) return;
-      var source = sourceFromUrl_(url);
-
-      if (!byUrl[url]) {
-        byUrl[url] = {
-          query: qStr,
-          title: result.title || "",
-          url: url,
-          source: source,
-          type: qType,
-          snippet: result.snippet || "",
-          score: result.score || ""
-        };
-      }
-    });
   });
+
+  if (requests.length > 0) {
+    Logger.log("Parallel executing " + requests.length + " search queries via UrlFetchApp.fetchAll...");
+    var responses = UrlFetchApp.fetchAll(requests);
+    responses.forEach(function (resp, idx) {
+      var meta = metaList[idx];
+      var results = [];
+      try {
+        if (resp.getResponseCode() >= 200 && resp.getResponseCode() < 300) {
+          var data = JSON.parse(resp.getContentText() || "{}");
+          if (meta.engine === "serper") {
+            results = (data.organic || []).map(function(r) { return { title: r.title || "", url: r.link || "", snippet: r.snippet || "", score: "85" }; });
+          } else if (meta.engine === "gsearch") {
+            results = (data.items || []).map(function(r) { return { title: r.title || "", url: r.link || "", snippet: r.snippet || "", score: "80" }; });
+          } else if (meta.engine === "tavily") {
+            results = (data.results || []).map(function(r) { return { title: r.title || "", url: r.url || "", snippet: r.content || r.snippet || "", score: r.score || "" }; });
+          }
+        }
+      } catch (e) {
+        Logger.log("Error parsing search results for query [" + meta.qStr + "]: " + e.message);
+      }
+
+      Logger.log("Query [" + meta.qStr + "] -> Found " + results.length + " candidates using " + meta.engine);
+
+      results.forEach(function (result) {
+        var url = normalizeUrl_(result.url || "");
+        if (!url || isExcludedUrl_(url, config)) return;
+        var source = sourceFromUrl_(url);
+
+        if (!byUrl[url]) {
+          byUrl[url] = {
+            query: meta.qStr,
+            title: result.title || "",
+            url: url,
+            source: source,
+            type: meta.qType,
+            snippet: result.snippet || "",
+            score: result.score || ""
+          };
+        }
+      });
+    });
+  }
 
   // 4. Enrich from intern-list.com (Airtable shared views)
   if (String(config.enableInternList || APP.defaults.enableInternList) === "true") {
@@ -983,7 +1000,7 @@ function processBatchLoop_(geminiKey, pages, config, isNewGrad) {
     Logger.log("Classifying " + label + " batch [" + batchNum + "/" + totalBatches + "] (" + batch.length + " pages)...");
 
     if (i > 0) {
-      Utilities.sleep(5000);
+      Utilities.sleep(200);
     }
 
     var classified = isNewGrad ?
