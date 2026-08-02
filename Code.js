@@ -92,6 +92,7 @@ function onOpen() {
     .addItem("Run Search Now", "runSearchNow")
     .addItem("Send Digest Now", "sendDigestNow")
     .addItem("Setup / Repair Dashboard", "setupDashboard")
+    .addItem("Clear Raw Candidates Only", "clearRawCandidatesOnly")
     .addItem("Clear Existing Data", "clearScoutData")
     .addSeparator()
     .addItem("Install Daily Trigger", "installDailyTrigger")
@@ -1686,6 +1687,17 @@ function getEvaluatedUrls_(ss) {
   return evaluated;
 }
 
+function clearRawCandidatesOnly() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(APP.sheets.raw);
+  if (sheet && sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, APP.rawHeaders.length).clearContent();
+    SpreadsheetApp.getUi().alert("RawCandidates cleared! Headers and data structure preserved.");
+  } else {
+    SpreadsheetApp.getUi().alert("RawCandidates is already empty!");
+  }
+}
+
 function writeRawCandidates_(ss, runId, candidates) {
   if (candidates.length === 0) return;
   var sheet = ss.getSheetByName(APP.sheets.raw);
@@ -1693,6 +1705,15 @@ function writeRawCandidates_(ss, runId, candidates) {
     return [runId, c.query, c.title, c.url, c.source, c.snippet, c.score];
   });
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, APP.rawHeaders.length).setValues(rows);
+
+  // Auto-prune RawCandidates to keep max 2000 rows for high sheet performance
+  var maxRows = 2000;
+  var totalRows = sheet.getLastRow();
+  if (totalRows > maxRows + 1) {
+    var deleteCount = totalRows - maxRows;
+    sheet.deleteRows(2, deleteCount);
+    Logger.log("Auto-pruned " + deleteCount + " old raw candidate log rows.");
+  }
 }
 
 function getDashboardSummary_(ss) {
