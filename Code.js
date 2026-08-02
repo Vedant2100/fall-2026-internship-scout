@@ -32,7 +32,7 @@ var APP = {
     includeRawCandidates: "true",
     excludedDomains: "workday, myworkdayjobs, wd1.myworkdaysite, wd5.myworkdayjobs, simplify",
     locationTerms: "San Francisco, Bay Area, Silicon Valley, Remote US, United States",
-    roleTerms: "AI, machine learning, ML, MLE, software, SWE, data science, research",
+    roleTerms: "AI, machine learning, ML, MLE, software, SWE, data science, research, agent engineer, AI agent, agentic, agent observability, LLM reasoning, long horizon, reinforcement learning, RL, RLHF, DPO, reward model, autonomous agent, tool use, OpenTelemetry",
     termTerms: "Fall 2026, part-time, intern, internship, co-op",
     emailSubjectPrefix: "Fall 2026 AI Internship Scout",
     classifyBatchSize: "7",
@@ -583,59 +583,61 @@ function readConfig_(ss) {
 function buildSearchQueries_(config) {
   var ats = '(site:jobs.ashbyhq.com OR site:greenhouse.io OR site:jobs.lever.co)';
 
-  // ── Core queries: run every single day (7 queries) ──────────────────────
+  // ── Core queries: run every single day ──────────────────────────────────
   var core = [
     { q: '("intern" OR "internship") ("AI" OR "machine learning" OR "ML" OR "research") ' + ats + ' ("San Francisco" OR "Bay Area") -workday', type: 'intern' },
     { q: '("intern" OR "internship") ("software engineer" OR "SWE" OR "data science") ' + ats + ' ("San Francisco" OR "Bay Area") -workday', type: 'intern' },
+    { q: '("agent engineer" OR "AI agent" OR "agentic" OR "agent observability") ' + ats + ' ("San Francisco" OR "Bay Area" OR "Remote") -workday', type: 'intern' },
+    { q: '("agentic" OR "LLM reasoning" OR "long-horizon" OR "long horizon" OR "reinforcement learning" OR "RL") ' + ats + ' ("San Francisco" OR "Bay Area" OR "Remote") -workday', type: 'intern' },
     { q: '("part-time" OR "part time" OR "flexible" OR co-op) "intern" ("AI" OR "software") "San Francisco" -workday', type: 'intern' },
   ];
 
   if (String(config.newGradSearchQueries || APP.defaults.newGradSearchQueries) === "true") {
-    core.push({ q: '("new grad" OR "new graduate" OR "entry level") ("AI" OR "machine learning" OR "research") ' + ats + ' ("San Francisco" OR "Bay Area") -workday', type: 'new_grad' });
+    core.push({ q: '("new grad" OR "new graduate" OR "entry level") ("AI" OR "machine learning" OR "research" OR "agent engineer" OR "RL") ' + ats + ' ("San Francisco" OR "Bay Area") -workday', type: 'new_grad' });
     core.push({ q: '("new grad" OR "new graduate" OR "entry level") ("software engineer" OR "SWE") ' + ats + ' ("San Francisco" OR "Bay Area") -workday', type: 'new_grad' });
-    core.push({ q: '"new grad" ("AI" OR "ML" OR "software") ("San Francisco" OR "Bay Area" OR "Remote") -workday', type: 'new_grad' });
+    core.push({ q: '"new grad" ("AI" OR "ML" OR "software" OR "agentic" OR "long horizon") ("San Francisco" OR "Bay Area" OR "Remote") -workday', type: 'new_grad' });
   }
 
   // ── Rotating queries: different set each day (8 per day, pool of 32) ────
   var pool = [
-    // Set 0 — Wellfound + specific ATS + broad
-    { q: '"intern" ("AI" OR "ML") site:wellfound.com ("San Francisco" OR "Remote") -workday', type: 'intern' },
-    { q: '"intern" ("software" OR "AI") site:jobright.ai "San Francisco" -workday', type: 'intern' },
-    { q: '"part-time" "intern" "AI" site:jobs.ashbyhq.com -workday', type: 'intern' },
+    // Set 0 — Wellfound + ATS + Agentic & RL
+    { q: '"intern" ("AI" OR "ML" OR "agent engineer" OR "RL") site:wellfound.com ("San Francisco" OR "Remote") -workday', type: 'intern' },
+    { q: '"intern" ("software" OR "AI" OR "agentic" OR "reinforcement learning") site:jobright.ai "San Francisco" -workday', type: 'intern' },
+    { q: '"part-time" "intern" ("AI" OR "agent" OR "long-horizon") site:jobs.ashbyhq.com -workday', type: 'intern' },
     { q: '"research intern" site:greenhouse.io ("San Francisco" OR "Bay Area") -workday', type: 'intern' },
-    { q: '"Fall 2026" "intern" ("machine learning" OR "AI") -workday', type: 'intern' },
-    { q: '"new grad" ("AI" OR "software") site:wellfound.com -workday', type: 'new_grad' },
+    { q: '"Fall 2026" "intern" ("machine learning" OR "AI" OR "agentic" OR "RLHF") -workday', type: 'intern' },
+    { q: '"new grad" ("AI" OR "software" OR "agent" OR "reinforcement learning") site:wellfound.com -workday', type: 'new_grad' },
     { q: '"AI research intern" ("part-time" OR "flexible") ("Bay Area" OR "San Francisco") -workday', type: 'intern' },
     { q: '"new grad" "software engineer" site:jobright.ai ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
 
-    // Set 1 — Lever focus + data science + startups
-    { q: '"intern" "research" site:jobs.lever.co ("Bay Area" OR "San Francisco") -workday', type: 'intern' },
+    // Set 1 — Lever focus + Agentic Evals, Long-Horizon & RL
+    { q: '"intern" ("research" OR "agentic" OR "long horizon" OR "RL") site:jobs.lever.co ("Bay Area" OR "San Francisco") -workday', type: 'intern' },
     { q: '"software intern" site:greenhouse.io ("San Francisco" OR "startup") -workday', type: 'intern' },
-    { q: '("MLE" OR "machine learning engineer") "intern" site:jobs.ashbyhq.com -workday', type: 'intern' },
-    { q: '"AI intern" site:jobright.ai ("Bay Area" OR "San Francisco") -workday', type: 'intern' },
+    { q: '("MLE" OR "agent engineer" OR "RL engineer") "intern" site:jobs.ashbyhq.com -workday', type: 'intern' },
+    { q: '("agentic workflow" OR "agent evaluation" OR "evals" OR "reward model") site:jobs.ashbyhq.com -workday', type: 'intern' },
     { q: '"new grad" "software" site:jobs.lever.co ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
     { q: '"data science intern" ("AI" OR "ML") ("San Francisco" OR "Bay Area") -workday', type: 'intern' },
     { q: '"software engineer intern" ("part-time" OR "co-op") ("AI" OR "startup") -workday', type: 'intern' },
-    { q: '"new grad" ("machine learning" OR "deep learning") site:greenhouse.io -workday', type: 'new_grad' },
+    { q: '"new grad" ("machine learning" OR "reinforcement learning" OR "deep learning") site:greenhouse.io -workday', type: 'new_grad' },
 
-    // Set 2 — LLM/NLP/GenAI focus + YC + vision
-    { q: '"intern" ("LLM" OR "NLP" OR "generative AI") site:greenhouse.io -workday', type: 'intern' },
-    { q: '"intern" ("reinforcement learning" OR "computer vision") site:jobs.ashbyhq.com -workday', type: 'intern' },
+    // Set 2 — LLM/NLP/GenAI + Long Horizon Reasoning & RLHF/DPO
+    { q: '"intern" ("LLM" OR "NLP" OR "generative AI" OR "agentic" OR "long-horizon") site:greenhouse.io -workday', type: 'intern' },
+    { q: '"intern" ("reinforcement learning" OR "RLHF" OR "DPO" OR "LLM reasoning" OR "evals") site:jobs.ashbyhq.com -workday', type: 'intern' },
     { q: '"software engineer intern" site:jobs.lever.co "startup" "San Francisco" -workday', type: 'intern' },
     { q: '"new grad" "machine learning" site:greenhouse.io ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
-    { q: '"intern" ("AI" OR "software") site:workatastartup.com -workday', type: 'intern' },
+    { q: '"intern" ("AI" OR "software" OR "agent" OR "reinforcement learning") site:workatastartup.com -workday', type: 'intern' },
     { q: '("part-time" OR "flexible") "software" "intern" ("Bay Area" OR "San Francisco") -workday', type: 'intern' },
-    { q: '"intern" ("agentic" OR "RAG" OR "retrieval") ("AI" OR "ML") -workday', type: 'intern' },
-    { q: '"new grad" ("AI" OR "research") site:jobs.ashbyhq.com ("Remote" OR "US") -workday', type: 'new_grad' },
+    { q: '"intern" ("agentic" OR "RAG" OR "retrieval" OR "OpenTelemetry" OR "autonomous agent") ("AI" OR "ML") -workday', type: 'intern' },
+    { q: '"new grad" ("AI" OR "research" OR "agent engineer" OR "RL") site:jobs.ashbyhq.com ("Remote" OR "US") -workday', type: 'new_grad' },
 
-    // Set 3 — Deep learning + co-op + remote + alternate platforms
-    { q: '"intern" ("deep learning" OR "neural network" OR "transformer") site:greenhouse.io -workday', type: 'intern' },
-    { q: '("co-op" OR "flexible hours") "intern" "AI" "San Francisco" -workday', type: 'intern' },
-    { q: '"research assistant" ("AI" OR "ML") ("San Francisco" OR "Bay Area") site:jobs.lever.co -workday', type: 'intern' },
-    { q: '"new grad" ("AI" OR "ML") site:jobs.ashbyhq.com ("Remote" OR "San Francisco") -workday', type: 'new_grad' },
+    // Set 3 — Deep learning + Long Horizon Planning & Reward Modeling
+    { q: '"intern" ("deep learning" OR "neural network" OR "agentic" OR "long horizon") site:greenhouse.io -workday', type: 'intern' },
+    { q: '("co-op" OR "flexible hours") "intern" ("AI" OR "agent" OR "RL") "San Francisco" -workday', type: 'intern' },
+    { q: '("agent observability" OR "memory governance" OR "reward model" OR "process reward") ("AI" OR "ML") -workday', type: 'intern' },
+    { q: '"new grad" ("AI" OR "ML" OR "RL") site:jobs.ashbyhq.com ("Remote" OR "San Francisco") -workday', type: 'new_grad' },
     { q: '"intern" "software" site:wellfound.com ("Bay Area" OR "Remote") -workday', type: 'intern' },
     { q: '"new grad" site:jobright.ai ("software" OR "AI") ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
-    { q: '"ML intern" OR "AI intern" ("part time" OR "part-time") 2026 -workday', type: 'intern' },
+    { q: '"ML intern" OR "AI intern" OR "Agent intern" OR "RL intern" ("part time" OR "part-time") 2026 -workday', type: 'intern' },
     { q: '"new grad" ("software engineer" OR "research") site:workatastartup.com -workday', type: 'new_grad' }
   ];
 
@@ -1031,10 +1033,12 @@ function classifyBatchWithGemini_(geminiKey, pages, config) {
     "",
     "CANDIDATE PROFILE FOR SCORING ALIGNMENT:",
     "- Education: B.Tech in CS from IIT Bombay (2023), MS in CS at UC Riverside (2025-2027).",
-    "- Background: 2+ years full-time Data Scientist (time-series forecasting, deep learning LSTMs/TCNs, SQL/Python agentic code gen workflows, RAG, Docker), plus research in LLM agent reasoning (ReAct, CoT, Buffer-of-Thought, Qwen2.5-7B).",
-    "- Ideal Fit: AI Agents, LLM reasoning/evals, RAG, applied ML/deep learning, MLOps/infrastructure, data science forecasting, backend SWE, or AI research labs.",
+    "- Experience: Research Intern at CompFly AI (San Francisco, CA, Jun 2026-Present) building Agentic Observability (OpenTelemetry nested span tree tracing, tool-call tracking, sub-agent handoffs, token cost normalized) and Agent Memory Governance (context poisoning & cross-session leakage audit).",
+    "- Background: 2+ years full-time Data Scientist at Finarb AI (time-series forecasting, LSTMs/TCNs, SQL+Python agentic code-gen workflows, RAG, Docker), plus research in long-horizon LLM agent reasoning (ReAct, CoT, Tree-of-Thought, Buffer-of-Thought, Qwen2.5-7B fine-tuning & MiniGrid sequential decision-making evals).",
+    "- HIGHEST PRIORITY FIT (Score 95-100): Agentic AI, AI Agent Engineer, Long-Horizon Reasoning & Planning, Reinforcement Learning (RL, RLHF, RLAIF, DPO, GRPO, PPO), Reward Modeling (PRMs/ORMs), Agent Infrastructure & Observability (OpenTelemetry/tracing), Agent Memory/Context Governance, LLM reasoning/evals (SWE-bench, GAIA, MiniGrid), RAG & GraphRAG, agentic coding tools, or AI research labs.",
+    "- SECONDARY FIT (Score 85-94): Applied ML/deep learning, MLOps/infrastructure, time-series data science forecasting, or backend SWE at tech startups / Big Tech.",
     "",
-    "Target: STRICTLY part-time or flexible-hour academic-semester internships in AI/ML research, MLE, SWE, or Data Science.",
+    "Target: STRICTLY part-time or flexible-hour academic-semester internships in Agentic AI, AI/ML research, MLE, SWE, or Data Science.",
     "CRITICAL RULE 1 (Part-time): Do NOT assume co-ops or internships are part-time. US/Canada co-ops are typically full-time 40-hour roles. You MUST only mark `is_relevant` as true if the posting explicitly states it is 'part-time', 'flexible hours', '10-20 hours/week', or designed to be completed concurrently with academic classes. If it is a full-time 40 hr/week position, or is silent on part-time flexibility, set `is_relevant` to false and `part_time` to 'No'.",
     "CRITICAL RULE 2 (Strictly CS / AI / Data Technical Roles): We ONLY want computer science, software engineering, machine learning, AI agents/LLM research, and data science roles. You MUST set `is_relevant` to false, score below 60, and track to 'Other' if the role is:",
     "  (a) Biological, medical, chemical, clinical, genomics, or physical sciences laboratory research (e.g., medical/genomics laboratory interns like Veracyte);",
@@ -1044,9 +1048,9 @@ function classifyBatchWithGemini_(geminiKey, pages, config) {
     "Use each page's URL exactly if it is a real application/job page.",
     "",
     "Return ONLY valid JSON matching this shape:",
-    '{"pages":[{"page_url":"THE_EXACT_PAGE_URL","opportunities":[{"is_relevant":true,"company":"","role":"","track":"AI Research|MLE|SWE|Data Science|Other","location":"","term":"Fall 2026|Unknown|Other","part_time":"Yes|No|Unknown","url":"","source":"Ashby|Greenhouse|Lever|Other","details":"1-2 sentence summary connecting role to candidate profile","visa_sponsorship":"Yes|No|Unknown","iitb_alumni":"Yes|No|Unknown","score":0,"reason":"short filtering rationale"}]}]}',
+    '{"pages":[{"page_url":"THE_EXACT_PAGE_URL","opportunities":[{"is_relevant":true,"company":"","role":"","track":"Agentic AI|AI Research|MLE|SWE|Data Science|Other","location":"","term":"Fall 2026|Unknown|Other","part_time":"Yes|No|Unknown","url":"","source":"Ashby|Greenhouse|Lever|Other","details":"1-2 sentence summary connecting role to candidate profile","visa_sponsorship":"Yes|No|Unknown","iitb_alumni":"Yes|No|Unknown","score":0,"reason":"short filtering rationale"}]}]}',
     "",
-    "Scoring: 90+ exact part-time or flexible AI/ML/SWE intern match aligned with candidate profile; 80-89 strong part-time/flexible match; below 80 if full-time, lab biology/hardware, or irrelevant.",
+    "Scoring: 95+ exact match on Agentic AI / AI Agent Eng / Long-Horizon Reasoning / Reinforcement Learning (RL/RLHF/DPO) / Agent Observability; 90-94 part-time AI/ML/SWE intern match; 80-89 strong part-time/flexible match; below 80 if full-time, lab biology/hardware, or irrelevant.",
     "If a page has no part-time or flexible opportunity, return an empty opportunities array for that page.",
     "You MUST return one entry in the pages array for EACH page below, even if opportunities is empty.",
     "",
@@ -1090,10 +1094,12 @@ function classifyNewGradBatchWithGemini_(geminiKey, pages, config) {
     "",
     "CANDIDATE PROFILE FOR SCORING ALIGNMENT:",
     "- Education: B.Tech in CS from IIT Bombay (2023), MS in CS at UC Riverside (2025-2027).",
-    "- Background: 2+ years full-time Data Scientist (time-series forecasting, deep learning LSTMs/TCNs, SQL/Python agentic code gen workflows, RAG, Docker), plus research in LLM agent reasoning (ReAct, CoT, Buffer-of-Thought, Qwen2.5-7B).",
-    "- Ideal Fit: AI Agents, LLM reasoning/evals, RAG, applied ML/deep learning, MLOps/infrastructure, data science forecasting, backend SWE, or AI research labs.",
+    "- Experience: Research Intern at CompFly AI (San Francisco, CA, Jun 2026-Present) building Agentic Observability (OpenTelemetry nested span tree tracing, tool-call tracking, sub-agent handoffs, token cost normalized) and Agent Memory Governance (context poisoning & cross-session leakage audit).",
+    "- Background: 2+ years full-time Data Scientist at Finarb AI (time-series forecasting, LSTMs/TCNs, SQL+Python agentic code-gen workflows, RAG, Docker), plus research in long-horizon LLM agent reasoning (ReAct, CoT, Tree-of-Thought, Buffer-of-Thought, Qwen2.5-7B fine-tuning & MiniGrid sequential decision-making evals).",
+    "- HIGHEST PRIORITY FIT (Score 95-100): Agentic AI, AI Agent Engineer, Long-Horizon Reasoning & Planning, Reinforcement Learning (RL, RLHF, RLAIF, DPO, GRPO, PPO), Reward Modeling (PRMs/ORMs), Agent Infrastructure & Observability (OpenTelemetry/tracing), Agent Memory/Context Governance, LLM reasoning/evals, RAG & GraphRAG, agentic coding tools, or AI research labs.",
+    "- SECONDARY FIT (Score 85-94): Applied ML/deep learning, MLOps/infrastructure, time-series data science forecasting, or backend SWE at tech startups / Big Tech.",
     "",
-    "Target: STRICTLY full-time new grad or entry-level (0-2 years experience / university grad) positions in AI/ML Research, MLE, SWE, or Data Science.",
+    "Target: STRICTLY full-time new grad or entry-level (0-2 years experience / university grad) positions in Agentic AI, AI/ML Research, MLE, SWE, or Data Science.",
     "CRITICAL RULE 1 (New Grad / Entry Level): We ONLY want full-time new grad or entry-level positions requiring 0 to 2 years of experience. If a posting requires 3+ years of experience, or is an internship/co-op, set `is_relevant` to false.",
     "CRITICAL RULE 2 (Strictly CS / AI / Data Technical Roles): We ONLY want computer science, software engineering, machine learning, AI agents/LLM research, and data science roles. You MUST set `is_relevant` to false, score below 60, and track to 'Other' if the role is:",
     "  (a) Biological, medical, chemical, clinical, genomics, or physical sciences laboratory research;",
@@ -1101,7 +1107,7 @@ function classifyNewGradBatchWithGemini_(geminiKey, pages, config) {
     "  (c) Product management, IT support, manual QA, finance/investment, design, marketing, or operations.",
     "",
     "PRIORITY TARGETS & SCORING GUIDANCE (must align with Candidate Profile):",
-    "- 95+: AI/ML Research / MLE / SWE role at a Frontier Research Lab (Google DeepMind, FAIR / Meta AI, OpenAI, Anthropic, xAI, SSI, Mistral, Cohere) OR top AI 'Neolab' / startup in Bay Area working on agentic coding, retrieval/RAG, reinforcement learning (RL), post-training, reasoning, or frontier models (e.g., Magic, Cursor / Anysphere, Cognition, Poolside, Factory, Codeium, Augment, E2B, Aider, Perplexity, Glean, Bespoke Labs, Liquid AI, Scale AI, Imbue, Sakana AI, Physical Intelligence, etc.) in San Francisco / Bay Area or Remote US.",
+    "- 95+: Agentic AI / AI Agent Engineer / Long-Horizon Reasoning / Reinforcement Learning (RL/RLHF/DPO) / Agent Observability / MLE / SWE role at a Frontier Research Lab (Google DeepMind, FAIR / Meta AI, OpenAI, Anthropic, xAI, SSI, Mistral, Cohere) OR top AI 'Neolab' / startup in Bay Area working on agentic coding, AI agent frameworks, retrieval/RAG, reinforcement learning (RL), post-training, reasoning, or frontier models (e.g., Magic, Cursor / Anysphere, Cognition, Poolside, Factory, Codeium, Augment, E2B, Aider, Perplexity, Glean, Bespoke Labs, Liquid AI, Scale AI, Imbue, Sakana AI, Physical Intelligence, etc.) in San Francisco / Bay Area or Remote US.",
     "- 90-94: SWE / AI / ML / DS new grad role at Big Tech (Google, Apple, Meta, Microsoft, Amazon, Tesla, NVIDIA) in San Francisco / Bay Area.",
     "- 80-89: SWE / ML new grad role at a well-known tech startup or standard tech company in Bay Area or Remote US aligned with candidate skills.",
     "- 70-79: Standard technical new grad role in other US locations.",
@@ -1111,7 +1117,7 @@ function classifyNewGradBatchWithGemini_(geminiKey, pages, config) {
     "Use each page's URL exactly if it is a real application/job page.",
     "",
     "Return ONLY valid JSON matching this shape:",
-    '{"pages":[{"page_url":"THE_EXACT_PAGE_URL","opportunities":[{"is_relevant":true,"company":"","role":"","track":"AI Research|MLE|SWE|Data Science|Other","location":"","term":"New Grad 2025/2026","part_time":"No","url":"","source":"Ashby|Greenhouse|Lever|Other","details":"1-2 sentence summary connecting role to candidate profile & Lab/Big Tech status","visa_sponsorship":"Yes|No|Unknown","iitb_alumni":"Yes|No|Unknown","score":0,"reason":"short scoring rationale based on Candidate Profile & Lab/Neolab/Big Tech status"}]}]}',
+    '{"pages":[{"page_url":"THE_EXACT_PAGE_URL","opportunities":[{"is_relevant":true,"company":"","role":"","track":"Agentic AI|AI Research|MLE|SWE|Data Science|Other","location":"","term":"New Grad 2025/2026","part_time":"No","url":"","source":"Ashby|Greenhouse|Lever|Other","details":"1-2 sentence summary connecting role to candidate profile & Lab/Big Tech status","visa_sponsorship":"Yes|No|Unknown","iitb_alumni":"Yes|No|Unknown","score":0,"reason":"short scoring rationale based on Candidate Profile & Lab/Neolab/Big Tech status"}]}]}',
     "",
     "If a page has no relevant new grad opportunity, return an empty opportunities array for that page.",
     "You MUST return one entry in the pages array for EACH page below, even if opportunities is empty.",
