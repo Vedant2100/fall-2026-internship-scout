@@ -587,14 +587,14 @@ function buildSearchQueries_(config) {
 
   // ── Core queries: run every single day (7 queries) ──────────────────────
   var core = [
-    { q: '("intern" OR "internship") ("AI" OR "machine learning" OR "ML" OR "research") ' + ats + ' -workday', type: 'intern' },
-    { q: '("intern" OR "internship") ("software engineer" OR "SWE" OR "data science") ' + ats + ' -workday', type: 'intern' },
+    { q: '("intern" OR "internship") ("AI" OR "machine learning" OR "ML" OR "research") ' + ats + ' ("San Francisco" OR "Bay Area") -workday', type: 'intern' },
+    { q: '("intern" OR "internship") ("software engineer" OR "SWE" OR "data science") ' + ats + ' ("San Francisco" OR "Bay Area") -workday', type: 'intern' },
     { q: '("part-time" OR "part time" OR "flexible" OR co-op) "intern" ("AI" OR "software") "San Francisco" -workday', type: 'intern' },
   ];
 
   if (String(config.newGradSearchQueries || APP.defaults.newGradSearchQueries) === "true") {
-    core.push({ q: '("new grad" OR "new graduate" OR "entry level") ("AI" OR "machine learning" OR "research") ' + ats + ' -workday', type: 'new_grad' });
-    core.push({ q: '("new grad" OR "new graduate" OR "entry level") ("software engineer" OR "SWE") ' + ats + ' -workday', type: 'new_grad' });
+    core.push({ q: '("new grad" OR "new graduate" OR "entry level") ("AI" OR "machine learning" OR "research") ' + ats + ' ("San Francisco" OR "Bay Area") -workday', type: 'new_grad' });
+    core.push({ q: '("new grad" OR "new graduate" OR "entry level") ("software engineer" OR "SWE") ' + ats + ' ("San Francisco" OR "Bay Area") -workday', type: 'new_grad' });
     core.push({ q: '"new grad" ("AI" OR "ML" OR "software") ("San Francisco" OR "Bay Area" OR "Remote") -workday', type: 'new_grad' });
   }
 
@@ -654,7 +654,7 @@ function searchGoogleCustomSearch_(query, gKey, gCx) {
   var url = "https://www.googleapis.com/customsearch/v1?key=" + encodeURIComponent(gKey) +
             "&cx=" + encodeURIComponent(gCx) +
             "&q=" + encodeURIComponent(query) +
-            "&num=10";
+            "&num=10&dateRestrict=w1";
   var response = UrlFetchApp.fetch(url, {
     method: "get",
     muteHttpExceptions: true
@@ -679,7 +679,8 @@ function searchSerper_(query, apiKey) {
   var url = "https://google.serper.dev/search";
   var payload = {
     q: query,
-    num: 10
+    num: 10,
+    tbs: "qdr:w"
   };
   var response = UrlFetchApp.fetch(url, {
     method: "post",
@@ -746,6 +747,7 @@ function collectCandidates_(tavilyKey, queries, config) {
           query: qStr,
           search_depth: String(config.searchDepth || APP.defaults.searchDepth),
           max_results: 10,
+          days: 7,
           include_answer: false,
           include_raw_content: false
         };
