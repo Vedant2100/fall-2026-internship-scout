@@ -422,15 +422,13 @@ function runSearch_(opts) {
 
     var newItems = upsertOpportunities_(ss, relevant);
     var emailed = false;
-    if (newItems.length > 0 || newRawGradItems.length > 0) {
-      Logger.log("Sending search results email to " + recipient + " (LLM items: " + newItems.length + ", Raw New Grad items: " + newRawGradItems.length + ")...");
-      sendResultsEmail_(recipient, ss, newItems, config, newRawGradItems);
-      if (newItems.length > 0) {
-        markEmailed_(ss, newItems);
-      }
+    if (newItems.length > 0) {
+      Logger.log("Sending search results email to " + recipient + " (LLM items: " + newItems.length + ")...");
+      sendResultsEmail_(recipient, ss, newItems, config);
+      markEmailed_(ss, newItems);
       emailed = true;
     } else {
-      Logger.log("No new opportunities or raw postings to email in this run.");
+      Logger.log("No new LLM-validated opportunities to email in this run.");
     }
 
     updateRun_(ss, runRow, {
@@ -1405,7 +1403,7 @@ function fetchNewGradSimplifyJobsCandidates_(config) {
 function upsertOpportunities_(ss, items) {
   var oppSheet = ss.getSheetByName(APP.sheets.opportunities);
   var seenSheet = ss.getSheetByName(APP.sheets.seen);
-  var seen = loadSeen_(ss);
+  var maps = loadSeenMaps_(ss);
   var now = new Date();
   var newRows = [];
   var newSeenRows = [];
@@ -1418,7 +1416,11 @@ function upsertOpportunities_(ss, items) {
     var fingerprint = fingerprint_(normalizedUrl, companyRole);
     if (!normalizedUrl || !item.company || !item.role) return;
 
-    if (seen[fingerprint]) return;
+    // Strict 3-way deduplication: block if fingerprint, URL, OR normalized companyRole was seen before
+    if (maps.fingerprints[fingerprint] || maps.urls[normalizedUrl] || maps.companyRoles[companyRole]) {
+      Logger.log("Deduplicated: Blocked duplicate opportunity [" + item.company + " - " + item.role + "]");
+      return;
+    }
 
     var id = Utilities.getUuid();
     var row = [
@@ -1446,7 +1448,12 @@ function upsertOpportunities_(ss, items) {
     ];
     newRows.push(row);
     newSeenRows.push([fingerprint, normalizedUrl, companyRole, now, now]);
-    seen[fingerprint] = { row: -1 };
+
+    // Mark as seen in memory for current batch
+    maps.fingerprints[fingerprint] = true;
+    maps.urls[normalizedUrl] = true;
+    maps.companyRoles[companyRole] = true;
+
     newItems.push(objectFromHeaders_(APP.opportunityHeaders, row));
   });
 
@@ -1457,22 +1464,6 @@ function upsertOpportunities_(ss, items) {
   }
 
   return newItems;
-}
-
-function touchExistingOpportunity_(sheet, url, companyRole, now) {
-  var values = sheet.getDataRange().getValues();
-  var urlIdx = APP.opportunityHeaders.indexOf("url");
-  var companyIdx = APP.opportunityHeaders.indexOf("company");
-  var roleIdx = APP.opportunityHeaders.indexOf("role");
-  var lastSeenCol = APP.opportunityHeaders.indexOf("last_seen_at") + 1;
-  for (var i = 1; i < values.length; i++) {
-    var existingUrl = normalizeUrl_(values[i][urlIdx] || "");
-    var existingCompanyRole = normalizeCompanyRole_(values[i][companyIdx], values[i][roleIdx]);
-    if (existingUrl === url || existingCompanyRole === companyRole) {
-      sheet.getRange(i + 1, lastSeenCol).setValue(now);
-      return;
-    }
-  }
 }
 
 function batchTouchOpportunities_(ss, activeUrlsMap, now) {
@@ -1515,16 +1506,44 @@ function batchTouchOpportunities_(ss, activeUrlsMap, now) {
   }
 }
 
-function loadSeen_(ss) {
-  var sheet = ss.getSheetByName(APP.sheets.seen);
-  var values = sheet.getDataRange().getValues();
-  var seen = {};
-  for (var i = 1; i < values.length; i++) {
-    if (values[i][0]) {
-      seen[String(values[i][0])] = { row: i + 1 };
+function loadSeenMaps_(ss) {
+  var seenSheet = ss.getSheetByName(APP.sheets.seen);
+  var oppSheet = ss.getSheetByName(APP.sheets.opportunities);
+  
+  var fingerprints = {};
+  var urls = {};
+  var companyRoles = {};
+
+  if (seenSheet && seenSheet.getLastRow() > 1) {
+    var sValues = seenSheet.getDataRange().getValues();
+    for (var i = 1; i < sValues.length; i++) {
+      var fp = String(sValues[i][0] || "");
+      var u = normalizeUrl_(sValues[i][1] || "");
+      var cr = String(sValues[i][2] || "");
+      if (fp) fingerprints[fp] = true;
+      if (u) urls[u] = true;
+      if (cr) companyRoles[cr] = true;
     }
   }
-  return seen;
+
+  if (oppSheet && oppSheet.getLastRow() > 1) {
+    var oValues = oppSheet.getDataRange().getValues();
+    var cIdx = APP.opportunityHeaders.indexOf("company");
+    var rIdx = APP.opportunityHeaders.indexOf("role");
+    var uIdx = APP.opportunityHeaders.indexOf("url");
+    for (var j = 1; j < oValues.length; j++) {
+      var ou = normalizeUrl_(oValues[j][uIdx] || "");
+      var ocr = normalizeCompanyRole_(oValues[j][cIdx], oValues[j][rIdx]);
+      if (ou) urls[ou] = true;
+      if (ocr) companyRoles[ocr] = true;
+    }
+  }
+
+  return {
+    fingerprints: fingerprints,
+    urls: urls,
+    companyRoles: companyRoles
+  };
 }
 
 function sendResultsEmail_(recipient, ss, items, config, rawItems) {
