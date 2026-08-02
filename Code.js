@@ -1553,50 +1553,86 @@ function loadSeenMaps_(ss) {
   };
 }
 
-function sendResultsEmail_(recipient, ss, items, config, rawItems) {
+function sendResultsEmail_(recipient, ss, items, config) {
   var shown = items || [];
   if (shown.length === 0) return; // Only send email if there are LLM-validated items
   
+  // Extract top company names for the subject line
+  var topCompanies = [];
+  shown.forEach(function(item) {
+    if (item.company && topCompanies.indexOf(item.company) === -1 && topCompanies.length < 3) {
+      topCompanies.push(item.company);
+    }
+  });
+  
+  var companySnippet = topCompanies.length > 0 ? " (" + topCompanies.join(", ") + ")" : "";
   var titleSuffix = shown.some(function(item) { return item.type === "new_grad"; }) ? 
-    (shown.length === 1 ? "job & internship opportunity" : "job & internship opportunities") : 
+    (shown.length === 1 ? "opportunity" : "opportunities") : 
     (shown.length === 1 ? "Fall 2026 internship" : "Fall 2026 internships");
   
-  var subject = config.emailSubjectPrefix + ": " + shown.length + " new " + titleSuffix;
+  var subject = config.emailSubjectPrefix + ": " + shown.length + " new " + titleSuffix + companySnippet;
   var sheetUrl = ss.getUrl();
   
   var html = [
-    "<p>Your scout found <strong>" + shown.length + "</strong> new LLM-validated " + (shown.length === 1 ? "opportunity" : "opportunities") + " since the last run.</p>",
-    "<p><a href=\"" + escapeHtml_(sheetUrl) + "\">Open dashboard in Google Sheets</a></p>"
+    "<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 0 auto; color: #1f2937;\">",
+    "<h2 style=\"color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;\">🤖 Fall 2026 AI & Agent Scout Digest</h2>",
+    "<p style=\"font-size: 15px; color: #4b5563;\">Found <strong>" + shown.length + "</strong> new LLM-validated " + (shown.length === 1 ? "opportunity" : "opportunities") + " matching your Agentic AI & RL candidate profile.</p>",
+    "<p><a href=\"" + escapeHtml_(sheetUrl) + "\" style=\"display: inline-block; background-color: #2563eb; color: #ffffff; padding: 8px 16px; text-decoration: none; border-radius: 6px; font-weight: 600;\">Open Dashboard in Google Sheets ↗</a></p>",
+    "<hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;\">"
   ];
+  
   var text = [
     "Your scout found " + shown.length + " new LLM-validated " + (shown.length === 1 ? "opportunity" : "opportunities") + " since the last run.",
     "Open dashboard in Google Sheets: " + sheetUrl,
-    ""
+    "",
+    "=== LLM-VALIDATED OPPORTUNITIES (" + shown.length + ") ==="
   ];
-
-  html.push("<h3>🤖 LLM-Validated Opportunities (" + shown.length + ")</h3>");
-  html.push("<ol>");
-  text.push("=== LLM-VALIDATED OPPORTUNITIES (" + shown.length + ") ===");
   
-  shown.forEach(function (item) {
-    var typeTag = item.type === "new_grad" ? "[NEW GRAD] " : "[INTERN] ";
+  shown.forEach(function (item, idx) {
+    var scoreNum = Number(item.score || 0);
+    var isTopTier = scoreNum >= 95;
+    var typeTag = item.type === "new_grad" ? "[NEW GRAD]" : "[INTERN]";
+    
+    var badgeHtml = "";
+    if (isTopTier) {
+      badgeHtml += " <span style=\"background-color: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700;\">🌟 TOP MATCH (95+)</span>";
+    }
+    if (String(item.iitb_alumni || "").toLowerCase() === "yes") {
+      badgeHtml += " <span style=\"background-color: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700;\">🎓 IITB ALUMNI</span>";
+    }
+    if (item.part_time === "Yes") {
+      badgeHtml += " <span style=\"background-color: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700;\">⚡ PART-TIME FLEXIBLE</span>";
+    }
+
     html.push(
-      "<li><strong>" + typeTag + escapeHtml_(item.company) + " - " + escapeHtml_(item.role) + "</strong><br>" +
-      escapeHtml_(item.location || "") + " | " + escapeHtml_(item.track || "") + " | Score: " + escapeHtml_(String(item.score || "")) + "<br>" +
-      escapeHtml_(item.details || "") + "<br>" +
-      "<a href=\"" + escapeHtml_(item.url) + "\">Apply / view posting</a></li>"
+      "<div style=\"background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px;\">" +
+        "<div style=\"font-size: 17px; font-weight: 700; color: #111827;\">" +
+          escapeHtml_(typeTag) + " " + escapeHtml_(item.company) + " — " + escapeHtml_(item.role) + badgeHtml +
+        "</div>" +
+        "<div style=\"font-size: 13px; color: #6b7280; margin: 6px 0;\">" +
+          "<strong>Location:</strong> " + escapeHtml_(item.location || "Remote US") + " &nbsp;|&nbsp; " +
+          "<strong>Track:</strong> " + escapeHtml_(item.track || "Agentic AI") + " &nbsp;|&nbsp; " +
+          "<strong>Score:</strong> <span style=\"color: #059669; font-weight: 700;\">" + escapeHtml_(String(item.score || "")) + "/100</span>" +
+        "</div>" +
+        "<div style=\"font-size: 14px; color: #374151; margin-bottom: 12px; line-height: 1.5;\">" +
+          escapeHtml_(item.details || "") +
+        "</div>" +
+        "<a href=\"" + escapeHtml_(item.url) + "\" style=\"display: inline-block; background-color: #059669; color: #ffffff; padding: 6px 14px; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 600;\">Apply Now ↗</a>" +
+      "</div>"
     );
+
     text.push([
-      typeTag + item.company + " - " + item.role,
+      (idx + 1) + ". " + typeTag + " " + item.company + " - " + item.role + (isTopTier ? " [TOP MATCH 95+]" : ""),
       "Location: " + (item.location || ""),
       "Track: " + (item.track || ""),
       "Score: " + (item.score || ""),
       "Details: " + (item.details || ""),
-      "URL: " + item.url,
+      "Apply URL: " + item.url,
       ""
     ].join("\n"));
   });
-  html.push("</ol>");
+
+  html.push("</div>");
 
   MailApp.sendEmail({
     to: recipient,
