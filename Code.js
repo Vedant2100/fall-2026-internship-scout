@@ -1527,71 +1527,48 @@ function loadSeen_(ss) {
 
 function sendResultsEmail_(recipient, ss, items, config, rawItems) {
   var shown = items || [];
-  var rawShown = rawItems || [];
-  var hasNewGrad = shown.some(function(item) { return item.type === "new_grad"; }) || rawShown.length > 0;
-  var totalCount = shown.length + rawShown.length;
-  var titleSuffix = hasNewGrad ? (totalCount === 1 ? "job & internship opportunity" : "job & internship opportunities") : (totalCount === 1 ? "Fall 2026 internship" : "Fall 2026 internships");
+  if (shown.length === 0) return; // Only send email if there are LLM-validated items
   
-  var subject = config.emailSubjectPrefix + ": " + totalCount + " new " + titleSuffix;
+  var titleSuffix = shown.some(function(item) { return item.type === "new_grad"; }) ? 
+    (shown.length === 1 ? "job & internship opportunity" : "job & internship opportunities") : 
+    (shown.length === 1 ? "Fall 2026 internship" : "Fall 2026 internships");
+  
+  var subject = config.emailSubjectPrefix + ": " + shown.length + " new " + titleSuffix;
   var sheetUrl = ss.getUrl();
   
   var html = [
-    "<p>Your scout found <strong>" + shown.length + "</strong> new LLM-validated " + (shown.length === 1 ? "opportunity" : "opportunities") +
-    (rawShown.length > 0 ? ", plus <strong>" + rawShown.length + "</strong> new unfiltered AI/ML/SWE postings from new grad sources since the last run." : ".") + "</p>",
+    "<p>Your scout found <strong>" + shown.length + "</strong> new LLM-validated " + (shown.length === 1 ? "opportunity" : "opportunities") + " since the last run.</p>",
     "<p><a href=\"" + escapeHtml_(sheetUrl) + "\">Open dashboard in Google Sheets</a></p>"
   ];
   var text = [
-    "Your scout found " + shown.length + " new LLM-validated " + (shown.length === 1 ? "opportunity" : "opportunities") +
-    (rawShown.length > 0 ? ", plus " + rawShown.length + " new unfiltered AI/ML/SWE postings from new grad sources since the last run." : ".") + ".",
+    "Your scout found " + shown.length + " new LLM-validated " + (shown.length === 1 ? "opportunity" : "opportunities") + " since the last run.",
     "Open dashboard in Google Sheets: " + sheetUrl,
     ""
   ];
 
-  if (shown.length > 0) {
-    html.push("<h3>🤖 LLM-Validated Opportunities (" + shown.length + ")</h3>");
-    html.push("<ol>");
-    text.push("=== LLM-VALIDATED OPPORTUNITIES (" + shown.length + ") ===");
-    shown.forEach(function (item) {
-      var typeTag = item.type === "new_grad" ? "[NEW GRAD] " : "[INTERN] ";
-      html.push(
-        "<li><strong>" + typeTag + escapeHtml_(item.company) + " - " + escapeHtml_(item.role) + "</strong><br>" +
-        escapeHtml_(item.location || "") + " | " + escapeHtml_(item.track || "") + " | Score: " + escapeHtml_(String(item.score || "")) + "<br>" +
-        escapeHtml_(item.details || "") + "<br>" +
-        "<a href=\"" + escapeHtml_(item.url) + "\">Apply / view posting</a></li>"
-      );
-      text.push([
-        typeTag + item.company + " - " + item.role,
-        "Location: " + (item.location || ""),
-        "Track: " + (item.track || ""),
-        "Score: " + (item.score || ""),
-        "Details: " + (item.details || ""),
-        "URL: " + item.url,
-        ""
-      ].join("\n"));
-    });
-    html.push("</ol>");
-  }
-
-  if (rawShown.length > 0) {
-    html.push("<h3>⚡ New Unfiltered Postings from New Grad Sources (" + rawShown.length + ")</h3>");
-    html.push("<p><em>Robustly detected since last run (No LLM filtering applied):</em></p>");
-    html.push("<ul>");
-    text.push("=== NEW UNFILTERED POSTINGS FROM NEW GRAD SOURCES (" + rawShown.length + ") ===");
-    rawShown.forEach(function (c) {
-      html.push(
-        "<li><strong>[NEW RAW] " + escapeHtml_(c.title || "New Posting") + "</strong><br>" +
-        escapeHtml_(c.snippet || "") + "<br>" +
-        "<a href=\"" + escapeHtml_(c.url || "") + "\">Apply / view posting</a></li>"
-      );
-      text.push([
-        "[NEW RAW] " + (c.title || "New Posting"),
-        "Details: " + (c.snippet || ""),
-        "URL: " + (c.url || ""),
-        ""
-      ].join("\n"));
-    });
-    html.push("</ul>");
-  }
+  html.push("<h3>🤖 LLM-Validated Opportunities (" + shown.length + ")</h3>");
+  html.push("<ol>");
+  text.push("=== LLM-VALIDATED OPPORTUNITIES (" + shown.length + ") ===");
+  
+  shown.forEach(function (item) {
+    var typeTag = item.type === "new_grad" ? "[NEW GRAD] " : "[INTERN] ";
+    html.push(
+      "<li><strong>" + typeTag + escapeHtml_(item.company) + " - " + escapeHtml_(item.role) + "</strong><br>" +
+      escapeHtml_(item.location || "") + " | " + escapeHtml_(item.track || "") + " | Score: " + escapeHtml_(String(item.score || "")) + "<br>" +
+      escapeHtml_(item.details || "") + "<br>" +
+      "<a href=\"" + escapeHtml_(item.url) + "\">Apply / view posting</a></li>"
+    );
+    text.push([
+      typeTag + item.company + " - " + item.role,
+      "Location: " + (item.location || ""),
+      "Track: " + (item.track || ""),
+      "Score: " + (item.score || ""),
+      "Details: " + (item.details || ""),
+      "URL: " + item.url,
+      ""
+    ].join("\n"));
+  });
+  html.push("</ol>");
 
   MailApp.sendEmail({
     to: recipient,
