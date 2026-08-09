@@ -412,7 +412,16 @@ function runSearch_(opts) {
     var classified = classifyPages_(geminiKey, extractedPages, config);
     
     var relevant = classified.filter(function (item) {
-      return item.is_relevant === true && Number(item.score || 0) >= Number(config.minScore || APP.defaults.minScore);
+      // This scout is now intentionally full-time/new-grad only. Keep legacy
+      // internship rows in the Sheet for history, but never add new ones.
+      var isFullTime = String(item.part_time || "").toLowerCase() === "no" &&
+        !/intern|internship|co-op|part[\s-]time|flexible hours?/i.test(
+          String(item.details || "") + " " + String(item.reason || "") + " " + String(item.role || "")
+        );
+      return item.type === "new_grad" &&
+        item.is_relevant === true &&
+        isFullTime &&
+        Number(item.score || 0) >= Number(config.minScore || APP.defaults.minScore);
     });
 
     Logger.log("Classification complete. Found " + relevant.length + " relevant options (out of " + classified.length + " total opportunities found on pages).");
@@ -1007,12 +1016,11 @@ function extractCandidatePages_(tavilyKey, candidates, config) {
 
 function classifyPages_(geminiKey, pages, config) {
   var newGradPages = pages.filter(function(p) { return p.type === "new_grad"; });
-  var internPages = pages.filter(function(p) { return p.type !== "new_grad"; });
   var items = [];
 
-  if (internPages.length > 0) {
-    Logger.log("=== Starting Classification for INTERN pages (" + internPages.length + " total) ===");
-    items = items.concat(processBatchLoop_(geminiKey, internPages, config, false));
+  var legacyPages = pages.filter(function(p) { return p.type !== "new_grad"; });
+  if (legacyPages.length > 0) {
+    Logger.log("Skipping " + legacyPages.length + " legacy internship pages; this scout is full-time/new-grad only.");
   }
   if (newGradPages.length > 0) {
     Logger.log("=== Starting Classification for NEW GRAD pages (" + newGradPages.length + " total) ===");
