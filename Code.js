@@ -614,7 +614,7 @@ function buildSearchQueries_(config) {
   var ats = '(site:jobs.ashbyhq.com OR site:greenhouse.io OR site:jobs.lever.co)';
   var fullTime = '("full-time" OR "full time" OR "new grad" OR "new graduate" OR "entry level" OR "early career" OR junior OR associate)';
   var locations = '("San Francisco" OR "Pleasanton" OR "Bay Area" OR "Silicon Valley" OR "Remote US" OR "United States")';
-  var technicalRoles = '("research engineer" OR "research scientist" OR "AI research" OR "machine learning engineer" OR "ML engineer" OR "applied scientist" OR "software engineer" OR SWE OR "data science" OR "agent engineer")';
+  var technicalRoles = '("research engineer" OR "research scientist" OR "AI research" OR "machine learning engineer" OR "ML engineer" OR "applied scientist" OR "applied AI" OR "data science" OR "agent engineer")';
   var frontierTopics = '(agentic OR "AI agent" OR "agent evaluation" OR observability OR "memory governance" OR "LLM reasoning" OR "long horizon" OR "reinforcement learning" OR RLHF OR DPO OR GRPO OR "post-training" OR "reward model" OR RAG)';
 
   // ── Core queries: run every day. This pipeline is full-time/new-grad only. ──
