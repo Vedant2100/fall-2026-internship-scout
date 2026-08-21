@@ -291,9 +291,9 @@ function sendDigestEmail_() {
     html.push("</ol>");
   }
 
-  renderSection("Starred Opportunities", "⭐", starred);
-  renderSection("Not Yet Applied", "🎯", unapplied);
-  renderSection("Already Applied", "✅", applied);
+  renderSection("Starred Opportunities", "", starred);
+  renderSection("Not Yet Applied", "", unapplied);
+  renderSection("Already Applied", "", applied);
 
   html.push("<hr><p><em>This digest is sent every " + (config.digestIntervalDays || APP.defaults.digestIntervalDays) + " days. Adjust frequency in your Config sheet (digestIntervalDays).</em></p>");
 
@@ -615,14 +615,14 @@ function buildSearchQueries_(config) {
   var locations = '("San Francisco" OR "Pleasanton" OR "Bay Area" OR "Silicon Valley" OR "Remote US" OR "United States")';
   var fullTime = '("full-time" OR "new grad" OR "entry level" OR "early career" OR junior OR associate OR "emerging talent" OR residency OR fellowship OR "Claude Corps")';
   var technicalRoles = '("research engineer" OR "research scientist" OR "AI research" OR "machine learning engineer" OR "applied scientist" OR "applied AI" OR "agent engineer" OR "AI safety engineer" OR "evals engineer" OR "AI infrastructure" OR "forward-deployed engineer")';
-  var frontierTopics = '(agentic OR "AI agent" OR "agent evaluation" OR observability OR "memory governance" OR "LLM reasoning" OR "long horizon" OR "reinforcement learning" OR RLHF OR DPO OR GRPO OR "post-training" OR "reward model" OR RAG OR LLMOps OR "model safety" OR alignment)';
+  var frontierTopics = '(agentic OR "AI agent" OR "agent evaluation" OR observability OR "LLM reasoning" OR "long horizon" OR "reinforcement learning" OR RLHF OR RLAIF OR DPO OR GRPO OR PPO OR "post-training" OR "reward model" OR "verifiable rewards" OR "tool use" OR benchmarks OR evals)';
 
   // ── Core queries: run every day. This pipeline is full-time/new-grad only. ──
   var core = [
     { q: fullTime + ' ' + technicalRoles + ' ' + ats + ' ' + locations + ' -workday -intern -internship -co-op', type: 'new_grad' },
     { q: fullTime + ' ' + frontierTopics + ' ' + ats + ' ' + locations + ' -workday -intern -internship -co-op', type: 'new_grad' },
     { q: '("research engineer" OR "applied scientist" OR "machine learning engineer") ' + fullTime + ' ' + ats + ' ' + locations + ' -workday -intern', type: 'new_grad' },
-    { q: '("software engineer" OR "ML engineer" OR "AI engineer") ' + fullTime + ' ' + ats + ' ' + locations + ' -workday -intern', type: 'new_grad' },
+    { q: '("applied AI" OR "ML engineer" OR "AI engineer") ' + fullTime + ' ' + ats + ' ' + locations + ' -workday -intern', type: 'new_grad' },
     { q: '"new grad" ' + frontierTopics + ' ' + ats + ' ' + locations + ' -workday', type: 'new_grad' },
     { q: '"entry level" ' + technicalRoles + ' ' + ats + ' ' + locations + ' -workday -intern', type: 'new_grad' }
   ];
@@ -630,21 +630,21 @@ function buildSearchQueries_(config) {
   // ── Rotating queries: different set each day, all full-time/new-grad ────
   var pool = [
     // Set 0 — Agentic systems, evaluation, and RL
-    { q: '"new grad" ("AI" OR "software" OR "agent" OR "reinforcement learning") site:wellfound.com -workday', type: 'new_grad' },
-    { q: '"entry level" ("AI agent" OR agentic OR "agent evaluation" OR evals) site:jobs.ashbyhq.com -workday -intern', type: 'new_grad' },
-    { q: '"new grad" ("RLHF" OR DPO OR GRPO OR "post-training") site:jobs.ashbyhq.com -workday', type: 'new_grad' },
+    { q: '"new grad" ("AI" OR "applied AI" OR "tool use" OR "multi-step reasoning") site:wellfound.com -workday', type: 'new_grad' },
+    { q: '"entry level" ("AI agent" OR agentic OR "agent evaluation" OR "LLM judge") site:jobs.ashbyhq.com -workday -intern', type: 'new_grad' },
+    { q: '"new grad" ("RLHF" OR RLAIF OR DPO OR GRPO OR "post-training" OR "reward model") site:jobs.ashbyhq.com -workday', type: 'new_grad' },
     { q: '"new grad" ("agent engineer" OR "AI engineer" OR "research engineer") site:greenhouse.io -workday', type: 'new_grad' },
-    { q: '"new grad" ("machine learning" OR "deep learning") site:jobs.lever.co ("Remote" OR "United States") -workday', type: 'new_grad' },
-    { q: '"new grad" "software engineer" site:jobright.ai ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
-    { q: '"full-time" "ML engineer" ("Bay Area" OR "Remote US") -workday -intern', type: 'new_grad' },
-    { q: '"new grad" "research engineer" ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
+    { q: '"new grad" ("evals" OR "benchmarks" OR "long-horizon planning") site:jobs.lever.co ("Remote" OR "United States") -workday', type: 'new_grad' },
+    { q: '"new grad" "AI engineer" site:jobright.ai ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
+    { q: '"full-time" "research engineer" ("reinforcement learning" OR "RL") ("Bay Area" OR "Remote US") -workday -intern', type: 'new_grad' },
+    { q: '"new grad" "applied research engineer" ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
 
     // Set 1 — Research engineering and ML infrastructure
     { q: '"new grad" ("research engineer" OR "research scientist" OR "applied scientist") site:jobs.lever.co -workday', type: 'new_grad' },
     { q: '"entry level" ("machine learning engineer" OR "ML infrastructure") site:greenhouse.io -workday', type: 'new_grad' },
     { q: '"new graduate" ("AI research" OR "machine learning research") ' + locations + ' -workday -intern', type: 'new_grad' },
-    { q: '"new grad" "software" site:jobs.lever.co ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
-    { q: '"early career" ("ML engineer" OR "AI engineer" OR "software engineer") ' + locations + ' -workday -intern', type: 'new_grad' },
+    { q: '"new grad" "AI infrastructure" site:jobs.lever.co ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
+    { q: '"early career" ("ML engineer" OR "AI engineer" OR "applied AI") ' + locations + ' -workday -intern', type: 'new_grad' },
     { q: '"associate machine learning engineer" ' + locations + ' -workday', type: 'new_grad' },
     { q: '"new grad" "data scientist" ("AI" OR "machine learning") ' + locations + ' -workday', type: 'new_grad' },
     { q: '("new grad" OR "entry level") ("ML platform" OR "ML infrastructure") ' + locations + ' -workday', type: 'new_grad' },
@@ -654,7 +654,7 @@ function buildSearchQueries_(config) {
     { q: '"entry level" ("reinforcement learning" OR RLHF OR DPO OR "LLM reasoning") site:jobs.ashbyhq.com -workday', type: 'new_grad' },
     { q: '"research engineer" ("post-training" OR "reasoning" OR "agent") ' + locations + ' -workday', type: 'new_grad' },
     { q: '"new grad" "machine learning" site:greenhouse.io ("San Francisco" OR "Remote") -workday', type: 'new_grad' },
-    { q: '"new grad" ("AI" OR "software" OR "agent" OR "reinforcement learning") site:workatastartup.com -workday', type: 'new_grad' },
+    { q: '"new grad" ("AI" OR "research" OR "agent" OR "reinforcement learning") site:workatastartup.com -workday', type: 'new_grad' },
     { q: '"full-time" ("agentic" OR "RAG" OR "retrieval" OR "OpenTelemetry") ("AI" OR "ML") -workday -intern', type: 'new_grad' },
     { q: '"new grad" ("AI" OR "research" OR "agent engineer" OR "RL") site:jobs.ashbyhq.com ("Remote" OR "US") -workday', type: 'new_grad' },
     { q: '"entry level" "AI research" ("San Francisco" OR "Bay Area" OR "Remote") -workday', type: 'new_grad' },
@@ -1158,10 +1158,10 @@ function classifyNewGradBatchWithGemini_(geminiKey, pages, config) {
     "- Background: 2+ years full-time Data Scientist at Finarb AI (time-series forecasting, LSTMs/TCNs, SQL+Python agentic code-gen workflows, RAG, Docker), plus research in long-horizon LLM agent reasoning (ReAct, CoT, Tree-of-Thought, Buffer-of-Thought, Qwen2.5-7B fine-tuning & MiniGrid sequential decision-making evals).",
     "- Work authorization: F-1 student expecting US OPT eligibility. Mark visa_sponsorship Yes only when the posting explicitly says sponsorship is available; otherwise use Unknown, never infer it.",
     "- HIGHEST PRIORITY FIT (Score 95-100): Agentic AI, AI Agent Engineer, Long-Horizon Reasoning & Planning, Reinforcement Learning (RL, RLHF, RLAIF, DPO, GRPO, PPO), Reward Modeling (PRMs/ORMs), Agent Infrastructure & Observability (OpenTelemetry/tracing), Agent Memory/Context Governance, LLM reasoning/evals, RAG & GraphRAG, agentic coding tools, or AI research labs.",
-    "- SECONDARY FIT (Score 85-94): Applied ML/deep learning, MLOps/infrastructure, or time-series data science forecasting.",
-    "- LOW PRIORITY (Score 60-79): Generic SWE, backend SWE, or fullstack roles without any AI/ML focus. You MUST score pure generic SWE roles below 80 UNLESS the company is a frontier AI Lab (e.g., OpenAI, Anthropic, Mistral, Cohere, Scale AI, DeepMind, etc.), in which case SWE roles remain highly relevant (Score 85+).",
+    "- SECONDARY FIT (Score 85-94): Applied ML/deep learning, Applied AI, MLOps/infrastructure, or time-series data science forecasting.",
+    "- LOW PRIORITY (Score < 60): Generic SWE, backend SWE, frontend, or fullstack roles. You MUST strictly penalize and score all generic SWE roles below 60, EVEN IF they are at a frontier AI lab.",
     "",
-    "Target: STRICTLY full-time new grad, early-career, or entry-level positions in Agentic AI, AI/ML Research, Research Engineering, MLE, SWE, or Data Science.",
+    "Target: STRICTLY full-time new grad, early-career, or entry-level positions in Agentic AI, AI/ML Research, Research Engineering, Applied AI, MLE, or Data Science.",
     "CRITICAL RULE 1 (Full-Time Early Career): Accept roles explicitly labeled new grad, new graduate, entry level, early career, junior, or associate, plus technically plausible roles requiring up to 3 years of experience. Reject internships, co-ops, part-time roles, and roles requiring 4+ years or senior/staff/lead experience.",
     "CRITICAL RULE 2 (Strictly CS / AI / Data Technical Roles): We ONLY want computer science, software engineering, machine learning, AI agents/LLM research, and data science roles. You MUST set `is_relevant` to false, score below 60, and track to 'Other' if the role is:",
     "  (a) Biological, medical, chemical, clinical, genomics, or physical sciences laboratory research;",
@@ -1170,9 +1170,9 @@ function classifyNewGradBatchWithGemini_(geminiKey, pages, config) {
     "",
     "PRIORITY TARGETS & SCORING GUIDANCE (must align with Candidate Profile):",
     "- 95+: Agentic AI / AI Agent Engineer / Long-Horizon Reasoning / Reinforcement Learning (RL/RLHF/DPO) / Agent Observability / Research Engineer role at a frontier lab or strong AI startup aligned with the profile.",
-    "- 90-94: Research Engineer, Applied Scientist, or MLE early-career role at a strong AI company aligned with the profile.",
-    "- 80-89: AI/ML focused technical early-career role at a startup/tech company, OR a generic SWE role at a frontier AI lab.",
-    "- Below 80: Generic SWE without AI focus (unless at an AI lab), irrelevant, nontechnical, internship/co-op, senior, or outside the experience range.",
+    "- 90-94: Research Engineer, Applied Scientist, Applied AI Engineer, or MLE early-career role at a strong AI company aligned with the profile.",
+    "- 80-89: AI/ML focused technical early-career role at a startup/tech company.",
+    "- Below 60: Generic SWE (frontend, backend, fullstack) EVEN at AI labs. Reject all nontechnical, internship/co-op, senior, or outside the experience range roles.",
     "",
     "Prefer San Francisco, Bay Area, Silicon Valley, Remote US, or US roles. Exclude Workday pages.",
     "If the page URL is an aggregator like Jobright (jobright.ai) or Wellfound, you MUST scan the page text for the actual original ATS application link (e.g., boards.greenhouse.io, jobs.lever.co, jobs.ashbyhq.com) and return THAT exact ATS URL in the \"url\" field instead of the aggregator URL. If it's already a direct ATS page, use its URL exactly.",
@@ -1633,7 +1633,7 @@ function sendResultsEmail_(recipient, ss, items, config) {
   
   var html = [
     "<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 0 auto; color: #1f2937;\">",
-    "<h2 style=\"color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;\">🤖 Full-Time AI Job Scout Digest</h2>",
+    "<h2 style=\"color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;\">Full-Time AI Job Scout Digest</h2>",
     "<p style=\"font-size: 15px; color: #4b5563;\">Found <strong>" + shown.length + "</strong> new LLM-validated full-time opportunities matching your Research Engineer / ML Engineer profile.</p>",
     "<p><a href=\"" + escapeHtml_(sheetUrl) + "\" style=\"display: inline-block; background-color: #2563eb; color: #ffffff; padding: 8px 16px; text-decoration: none; border-radius: 6px; font-weight: 600;\">Open Dashboard in Google Sheets ↗</a></p>",
     "<hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;\">"
